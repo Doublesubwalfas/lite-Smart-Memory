@@ -515,7 +515,7 @@ If all new entries are duplicates and nothing needs to be added, output exactly:
  * Asks the model to produce three sections from stored memories:
  *   character_state  - current goals, emotional posture, fears, loyalties
  *   world_state      - current location, threats, unresolved events, time context
- *   relationship_matrix - one line per named entity with directional state + confidence
+ *   relationship_matrix - one line per named entity with directional state
  *
  * All three sections are requested in one call to avoid extra model round-trips
  * on local hardware. Output uses XML-style tags so the parser can locate each
@@ -571,7 +571,7 @@ Time: [time context - time of day, season, elapsed time since a key event, or "u
 </world_state>
 
 <relationship_matrix>
-[EntityName] ([type]): [directional one-line state] [confidence: 0.X]
+[EntityName] ([type]): [directional one-line state]
 (one line per entity from the KNOWN ENTITIES list; omit this section entirely if no entities are known)
 </relationship_matrix>`
   );
