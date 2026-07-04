@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Trailing metadata tags no longer appear in memory content.** Some models
+  append score and expiration after the content text (e.g. `[detail] Content.[2:session]`)
+  instead of embedding them in the opening bracket. The parser now strips these
+  trailing tags and folds the values in correctly, so they never reach stored
+  memory text.
+
 ## [1.8.1] - 2026-07-02
 
 ### Added
