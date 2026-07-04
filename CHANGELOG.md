@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Confidence scores no longer appear in relationship entries in profiles.**
+  The profile generation prompt requested `[confidence: 0.X]` on each
+  relationship line, but no downstream code ever consumed the value. It
+  appeared verbatim in the injected context, cluttering the roleplay LLM's
+  input. Removed from the prompt; existing profiles will drop the scores
+  naturally as they regenerate.
 - **Trailing metadata tags no longer appear in memory content.** Some models
   append score and expiration after the content text (e.g. `[detail] Content.[2:session]`)
   instead of embedding them in the opening bracket. The parser now strips these
