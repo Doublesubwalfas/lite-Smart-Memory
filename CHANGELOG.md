@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Away recap no longer disappears seconds after appearing.** Recap
+  generation can take minutes, and SillyTavern can fire `CHAT_CHANGED` and
+  `CHAT_LOADED` more than once for a single chat load. `onChatChangedImpl`
+  unconditionally removed any visible recap overlay on every run, so a
+  second load event for the same chat - arriving any time after the recap
+  finally displayed - would wipe it almost immediately, often before it
+  could be read. The overlay is now only removed on an actual chat switch.
 - **State Ledger tier in the extraction model test no longer displays
   malformed output.** The test's display code reconstructed each result line
   directly from `parseStateCardResponse`'s internal Map - whose key is a
