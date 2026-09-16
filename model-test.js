@@ -271,7 +271,7 @@ export const STATE_TEST_ENTITIES = [
 export const STATE_TEST_MESSAGES = [
   {
     name: 'Kael',
-    text: "The graze on my shoulder had stopped bleeding by the time I reached the lower passage. I pulled the guard's cloak tighter - the fit was poor but the badge on the chest was what mattered.",
+    text: "The graze on my shoulder had stopped bleeding by the time I reached the dungeon's lower passage. I pulled the guard's cloak tighter - the fit was poor but the badge on the chest was what mattered.",
   },
   {
     name: 'Kael',

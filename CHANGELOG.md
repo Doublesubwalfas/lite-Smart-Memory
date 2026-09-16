@@ -27,6 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **State Ledger test scenario no longer contradicts its own extraction
+  rules.** The scenario text only ever said Kael reached "the lower
+  passage," never "dungeon," while the state extraction prompt's strict
+  rules explicitly forbid inferring an entity's location rather than
+  reading it directly from the text - and the test's own expected answer
+  required exactly that inference (`location=dungeon interior`). A careful
+  reasoning model correctly noticed this contradiction and could spend a
+  very long time deliberating over it rather than producing garbled or
+  incorrect output; less careful models just silently guessed the intended
+  answer. Kael's opening line now explicitly mentions the dungeon, so the
+  location is directly stated and no inference is required.
 - **Optional tiers no longer fail the whole extraction model test.** State
   Ledger and Perspectives & Secrets are opt-in features, but an empty result
   from either was treated the same as a failure in a core tier - the whole
