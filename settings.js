@@ -1193,18 +1193,40 @@ export function bindSettingsUI(ctrl) {
     $result
       .show()
       .html(
-        '<div class="sm_model_test_running"><i class="fa-solid fa-spinner fa-spin"></i> Running extraction test...</div>',
+        '<div class="sm_model_test_running"><i class="fa-solid fa-spinner fa-spin"></i> Running extraction test...</div><div class="sm_model_test_preview"></div>',
       );
+
+    // Live preview during streaming (Ollama and local OpenAI Compatible only - see
+    // generateMemoryExtract). Throttled to avoid flooding the DOM with per-token
+    // updates on fast local models. Shows thinking text when present, falling back
+    // to the output itself, so a model stuck repeating the same lines is visible
+    // before the tier's budget runs out.
+    let lastPreviewUpdate = 0;
+    const PREVIEW_THROTTLE_MS = 150;
+    const PREVIEW_TAIL_CHARS = 400;
+    const onChunk = ({ content, thinking }) => {
+      const now = Date.now();
+      if (now - lastPreviewUpdate < PREVIEW_THROTTLE_MS) return;
+      lastPreviewUpdate = now;
+      const text = thinking || content;
+      const label = thinking ? 'Thinking' : 'Output';
+      const tail = text.length > PREVIEW_TAIL_CHARS ? text.slice(-PREVIEW_TAIL_CHARS) : text;
+      $result.find('.sm_model_test_preview').text(tail ? `${label}: …${tail}` : '');
+    };
 
     let outcome;
     try {
       outcome = await runModelTest(
         () => !modelTestRunning,
         (current, total, name) => {
-          $result.html(
-            `<div class="sm_model_test_running"><i class="fa-solid fa-spinner fa-spin"></i> Running extraction test... (${current}/${total}: ${name})</div>`,
-          );
+          $result
+            .find('.sm_model_test_running')
+            .html(
+              `<i class="fa-solid fa-spinner fa-spin"></i> Running extraction test... (${current}/${total}: ${name})`,
+            );
+          $result.find('.sm_model_test_preview').text('');
         },
+        onChunk,
       );
     } catch (err) {
       console.error('[SmartMemory] Model test failed:', err);

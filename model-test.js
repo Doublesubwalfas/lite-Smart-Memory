@@ -23,7 +23,8 @@
  *
  * runModelTest               - runs the test against the configured memory LLM;
  *                              accepts an optional isCancelled callback to abort between tiers,
- *                              and an optional onProgress callback fired before each tier starts
+ *                              an optional onProgress callback fired before each tier starts,
+ *                              and an optional onChunk callback for a live streaming preview
  * TEST_CHARACTERS            - characters in the main Yara/Cael scenario
  * TEST_MESSAGES              - messages for the main scenario
  * EPISTEMIC_TEST_CHARACTERS  - characters in the Mira/Sera/Ryn/Dael epistemic scenario
@@ -439,9 +440,14 @@ const TIER_DEFS = [
  *
  * @param {() => boolean} [isCancelled] - optional callback; return true to abort before the next tier
  * @param {(current: number, total: number, name: string) => void} [onProgress] - optional callback fired before each tier starts, 1-indexed
+ * @param {(snapshot: {content: string, thinking: string}) => void} [onChunk] - optional streaming preview callback, forwarded to generateMemoryExtract; only takes effect for the Ollama and local OpenAI Compatible sources
  * @returns {Promise<{tiers: Array, failedTier: string|null, cancelled?: boolean}>}
  */
-export async function runModelTest(isCancelled = () => false, onProgress = () => {}) {
+export async function runModelTest(
+  isCancelled = () => false,
+  onProgress = () => {},
+  onChunk = null,
+) {
   const chatHistory = TEST_MESSAGES.map((m) => `${m.name}: ${m.text}`).join('\n\n');
 
   const tiers = [];
@@ -458,7 +464,10 @@ export async function runModelTest(isCancelled = () => false, onProgress = () =>
     smLog(
       `[ModelTest] Prompt length for "${def.name}": ${prompt.length} chars (~${Math.round(prompt.length / 4)} tokens)`,
     );
-    const response = await generateMemoryExtract(prompt, { responseLength: def.responseLength });
+    const response = await generateMemoryExtract(prompt, {
+      responseLength: def.responseLength,
+      onChunk,
+    });
     smLog(`[ModelTest] Raw response for tier "${def.name}":`, response);
     const { items, count } = def.parse(response);
 

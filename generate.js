@@ -195,18 +195,32 @@ export async function fetchOllamaModels(baseUrl) {
 /**
  * Sends a prompt to an Ollama instance and returns the response text.
  * Uses the /api/chat endpoint with a single user message.
+ *
+ * When onChunk is provided, the request streams (Ollama emits one JSON
+ * object per line, NDJSON-style) and onChunk is called after every line
+ * with the accumulated { content, thinking } so far. This is only used by
+ * the model test panel to show a live preview - production extraction calls
+ * this without onChunk and gets the same single-shot behavior as before.
+ *
  * @param {string} prompt
  * @param {Array} [priorMessages] - Optional prior messages for summarization context.
  * @param {number} [numPredict] - Token generation limit passed as Ollama's num_predict option.
+ * @param {(snapshot: {content: string, thinking: string}) => void} [onChunk] - optional streaming preview callback
  * @returns {Promise<string>}
  */
-async function generateOllama(prompt, priorMessages = [], numPredict = getGenerationBudget()) {
+async function generateOllama(
+  prompt,
+  priorMessages = [],
+  numPredict = getGenerationBudget(),
+  onChunk = null,
+) {
   const settings = extension_settings[MODULE_NAME];
   const url = getOllamaUrl();
   const model = settings?.ollama_model;
   if (!model) throw new Error('No Ollama model selected. Choose a model in Smart Memory settings.');
 
   const messages = [...priorMessages, { role: 'user', content: prompt }];
+  const streaming = typeof onChunk === 'function';
 
   const thisController = new AbortController();
   memoryAbortController = thisController;
@@ -217,7 +231,7 @@ async function generateOllama(prompt, priorMessages = [], numPredict = getGenera
       body: JSON.stringify({
         model,
         messages,
-        stream: false,
+        stream: streaming,
         options: {
           num_predict: numPredict,
         },
@@ -225,8 +239,32 @@ async function generateOllama(prompt, priorMessages = [], numPredict = getGenera
       signal: thisController.signal,
     });
     if (!response.ok) throw new Error(`Ollama responded with ${response.status}`);
-    const data = await response.json();
-    return data.message?.content ?? '';
+
+    if (!streaming) {
+      const data = await response.json();
+      return data.message?.content ?? '';
+    }
+
+    let content = '';
+    let thinking = '';
+    let buffer = '';
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const chunk = JSON.parse(line);
+        content += chunk.message?.content ?? '';
+        thinking += chunk.message?.thinking ?? '';
+        onChunk({ content, thinking });
+      }
+    }
+    return content;
   } catch (err) {
     if (err.name === 'AbortError') return '';
     throw err;
@@ -273,15 +311,23 @@ function isLocalUrl(url) {
  * are routed through ST's server-side proxy (/api/backends/chat-completions/generate)
  * to avoid CORS restrictions that cloud providers impose on browser origins.
  *
+ * When onChunk is provided and the URL is local, the request streams via
+ * SSE ("data: {...}" lines, OpenAI-compatible format) and onChunk is called
+ * after every event with the accumulated { content, thinking } so far.
+ * Remote/proxied requests never stream, regardless of onChunk - this is only
+ * used by the model test panel for a live preview on local servers.
+ *
  * @param {string} prompt
  * @param {Array} [priorMessages] - Optional prior messages for summarization context.
  * @param {number} responseLength
+ * @param {(snapshot: {content: string, thinking: string}) => void} [onChunk] - optional streaming preview callback (local URLs only)
  * @returns {Promise<string>}
  */
 async function generateOpenAICompat(
   prompt,
   priorMessages = [],
   responseLength = getGenerationBudget(),
+  onChunk = null,
 ) {
   const settings = extension_settings[MODULE_NAME];
   const baseUrl = (settings?.openai_compat_url || '').replace(/\/$/, '').replace(/\/v1$/, '');
@@ -297,9 +343,11 @@ async function generateOpenAICompat(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const thisController = new AbortController();
     memoryAbortController = thisController;
+    const local = isLocalUrl(baseUrl);
+    const streaming = local && typeof onChunk === 'function';
     try {
       let response;
-      if (isLocalUrl(baseUrl)) {
+      if (local) {
         // Direct fetch for local servers - no CORS issue on private network addresses.
         const headers = { 'Content-Type': 'application/json' };
         if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
@@ -310,7 +358,7 @@ async function generateOpenAICompat(
             model: model || undefined,
             messages,
             max_tokens: responseLength > 0 ? responseLength : undefined,
-            stream: false,
+            stream: streaming,
           }),
           signal: thisController.signal,
         });
@@ -339,9 +387,34 @@ async function generateOpenAICompat(
       }
 
       if (response.ok) {
-        const data = await response.json();
-        if (data?.error) throw new Error(data.error.message || 'OpenAI Compatible API error');
-        return data.choices?.[0]?.message?.content ?? '';
+        if (!streaming) {
+          const data = await response.json();
+          if (data?.error) throw new Error(data.error.message || 'OpenAI Compatible API error');
+          return data.choices?.[0]?.message?.content ?? '';
+        }
+
+        let content = '';
+        let thinking = '';
+        let buffer = '';
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split('\n\n');
+          buffer = events.pop() ?? '';
+          for (const event of events) {
+            const line = event.replace(/^data:\s*/, '').trim();
+            if (!line || line === '[DONE]') continue;
+            const chunk = JSON.parse(line);
+            const delta = chunk.choices?.[0]?.delta ?? {};
+            content += delta.content ?? '';
+            thinking += delta.reasoning_content ?? delta.reasoning ?? '';
+            onChunk({ content, thinking });
+          }
+        }
+        return content;
       }
 
       // Retry on 5xx (transient server errors) and 429 (rate limiting from
@@ -381,16 +454,17 @@ async function generateOpenAICompat(
  * @param {string} prompt - The complete prompt to send
  * @param {object} [options]
  * @param {number} [options.responseLength=600] - Max tokens to generate
+ * @param {(snapshot: {content: string, thinking: string}) => void} [options.onChunk] - optional streaming preview callback; only honored for the Ollama and local OpenAI Compatible sources
  * @returns {Promise<string>} The raw model response
  */
-export async function generateMemoryExtract(prompt, { responseLength = 600 } = {}) {
+export async function generateMemoryExtract(prompt, { responseLength = 600, onChunk = null } = {}) {
   const source = getSource();
   let raw;
 
   if (source === memory_sources.ollama) {
-    raw = await generateOllama(prompt, []);
+    raw = await generateOllama(prompt, [], undefined, onChunk);
   } else if (source === memory_sources.openai_compatible) {
-    raw = await generateOpenAICompat(prompt, []);
+    raw = await generateOpenAICompat(prompt, [], undefined, onChunk);
   } else if (source === memory_sources.connection_profile) {
     raw = await generateWithConnectionProfile(prompt, [], responseLength);
   } else if (source === memory_sources.webllm) {
