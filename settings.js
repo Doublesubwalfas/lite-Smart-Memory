@@ -1193,25 +1193,33 @@ export function bindSettingsUI(ctrl) {
     $result
       .show()
       .html(
-        '<div class="sm_model_test_running"><i class="fa-solid fa-spinner fa-spin"></i> Running extraction test...</div><div class="sm_model_test_preview"></div>',
+        '<div class="sm_model_test_running"><i class="fa-solid fa-spinner fa-spin"></i> Running extraction test...</div>' +
+          '<div class="sm_model_test_preview_wrap" hidden>' +
+          '<div class="sm_model_test_preview_header">Thinking</div>' +
+          '<div class="sm_model_test_preview"></div>' +
+          '</div>',
       );
 
     // Live preview during streaming (Ollama and local OpenAI Compatible only - see
     // generateMemoryExtract). Throttled to avoid flooding the DOM with per-token
-    // updates on fast local models. Shows thinking text when present, falling back
-    // to the output itself, so a model stuck repeating the same lines is visible
-    // before the tier's budget runs out.
+    // updates on fast local models. Only shown for thinking models - a model with
+    // no thinking output gets no preview at all, since the point is watching
+    // reasoning for repetition/loops, not narrating final output token-by-token.
+    // The box scrolls to its own bottom on every update so the newest tokens stay
+    // visible instead of being clipped by the fixed-height overflow.
     let lastPreviewUpdate = 0;
     const PREVIEW_THROTTLE_MS = 150;
     const PREVIEW_TAIL_CHARS = 400;
-    const onChunk = ({ content, thinking }) => {
+    const onChunk = ({ thinking }) => {
+      if (!thinking) return;
       const now = Date.now();
       if (now - lastPreviewUpdate < PREVIEW_THROTTLE_MS) return;
       lastPreviewUpdate = now;
-      const text = thinking || content;
-      const label = thinking ? 'Thinking' : 'Output';
-      const tail = text.length > PREVIEW_TAIL_CHARS ? text.slice(-PREVIEW_TAIL_CHARS) : text;
-      $result.find('.sm_model_test_preview').text(tail ? `${label}: …${tail}` : '');
+      const tail =
+        thinking.length > PREVIEW_TAIL_CHARS ? thinking.slice(-PREVIEW_TAIL_CHARS) : thinking;
+      $result.find('.sm_model_test_preview_wrap').prop('hidden', false);
+      const $preview = $result.find('.sm_model_test_preview').text(`…${tail}`);
+      $preview.scrollTop($preview[0].scrollHeight);
     };
 
     let outcome;
@@ -1224,6 +1232,7 @@ export function bindSettingsUI(ctrl) {
             .html(
               `<i class="fa-solid fa-spinner fa-spin"></i> Running extraction test... (${current}/${total}: ${name})`,
             );
+          $result.find('.sm_model_test_preview_wrap').prop('hidden', true);
           $result.find('.sm_model_test_preview').text('');
         },
         onChunk,

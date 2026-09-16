@@ -936,15 +936,26 @@
   font-style: italic;
 }
 
-#smart_memory_settings .sm_model_test_preview {
+#smart_memory_settings .sm_model_test_preview_wrap {
   margin-top: 4px;
+}
+
+#smart_memory_settings .sm_model_test_preview_header {
+  font-size: 0.75em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.5;
+  margin-bottom: 2px;
+}
+
+#smart_memory_settings .sm_model_test_preview {
   padding: 6px 8px;
   font-family: monospace;
   font-size: 0.8em;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 5.5em;
-  overflow: hidden;
+  overflow-y: auto;
   opacity: 0.6;
   border-left: 2px solid currentColor;
 }

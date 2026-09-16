@@ -17,11 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starts.
 - **Live streaming preview in the extraction model test.** For the Ollama and
   local OpenAI Compatible sources, the test panel now streams the model's
-  response as it generates and shows a live tail of its thinking (or output,
-  for non-thinking models) beneath the progress spinner. This lets a stuck or
-  looping model be spotted while it is still generating instead of only after
-  it times out or exhausts its token budget. Production extraction is
-  unaffected - it still runs non-streaming as before.
+  response as it generates and shows a live, auto-scrolling tail of its
+  thinking beneath the progress spinner, under a "Thinking" header. This lets
+  a stuck or looping model be spotted while it is still generating instead of
+  only after it times out or exhausts its token budget. Only shown for
+  thinking models - a model with no reasoning output gets no preview box at
+  all. Production extraction is unaffected - it still runs non-streaming as
+  before.
 
 ### Fixed
 
