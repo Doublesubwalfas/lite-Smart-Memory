@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-tier progress in the extraction model test.** The "Test Extraction
+  Model" panel previously showed only a static spinner for the entire run,
+  giving no indication of which of the five tiers was in progress or how
+  many remained. Slow local models can take several minutes per tier, so the
+  spinner now shows "(current/total: tier name)" and updates as each tier
+  starts.
+
 ### Fixed
 
 - **Confidence scores no longer appear in relationship entries in profiles.**

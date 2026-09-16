@@ -1198,7 +1198,14 @@ export function bindSettingsUI(ctrl) {
 
     let outcome;
     try {
-      outcome = await runModelTest(() => !modelTestRunning);
+      outcome = await runModelTest(
+        () => !modelTestRunning,
+        (current, total, name) => {
+          $result.html(
+            `<div class="sm_model_test_running"><i class="fa-solid fa-spinner fa-spin"></i> Running extraction test... (${current}/${total}: ${name})</div>`,
+          );
+        },
+      );
     } catch (err) {
       console.error('[SmartMemory] Model test failed:', err);
       $result.html(

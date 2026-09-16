@@ -22,7 +22,8 @@
  * pipeline and returns structured per-tier results for display in the UI.
  *
  * runModelTest               - runs the test against the configured memory LLM;
- *                              accepts an optional isCancelled callback to abort between tiers
+ *                              accepts an optional isCancelled callback to abort between tiers,
+ *                              and an optional onProgress callback fired before each tier starts
  * TEST_CHARACTERS            - characters in the main Yara/Cael scenario
  * TEST_MESSAGES              - messages for the main scenario
  * EPISTEMIC_TEST_CHARACTERS  - characters in the Mira/Sera/Ryn/Dael epistemic scenario
@@ -437,15 +438,19 @@ const TIER_DEFS = [
  * Tiers are run sequentially to avoid OOM on local models.
  *
  * @param {() => boolean} [isCancelled] - optional callback; return true to abort before the next tier
+ * @param {(current: number, total: number, name: string) => void} [onProgress] - optional callback fired before each tier starts, 1-indexed
  * @returns {Promise<{tiers: Array, failedTier: string|null, cancelled?: boolean}>}
  */
-export async function runModelTest(isCancelled = () => false) {
+export async function runModelTest(isCancelled = () => false, onProgress = () => {}) {
   const chatHistory = TEST_MESSAGES.map((m) => `${m.name}: ${m.text}`).join('\n\n');
 
   const tiers = [];
 
-  for (const def of TIER_DEFS) {
+  for (let i = 0; i < TIER_DEFS.length; i++) {
+    const def = TIER_DEFS[i];
     if (isCancelled()) return { tiers, failedTier: null, cancelled: true };
+
+    onProgress(i + 1, TIER_DEFS.length, def.name);
 
     // Epistemic and State Ledger tiers use their own test scenarios.
     // All other tiers use the shared chat history.
