@@ -305,6 +305,7 @@ const TIER_DEFS = [
   {
     key: 'longterm',
     name: 'Long-term Memories',
+    required: true,
     enabledKey: 'longterm_enabled',
     scenario: MAIN_SCENARIO,
     hint:
@@ -321,6 +322,7 @@ const TIER_DEFS = [
   {
     key: 'session',
     name: 'Session Memories',
+    required: true,
     enabledKey: 'session_enabled',
     scenario: MAIN_SCENARIO,
     hint:
@@ -337,6 +339,7 @@ const TIER_DEFS = [
   {
     key: 'arcs',
     name: 'Story Arcs',
+    required: true,
     enabledKey: 'arcs_enabled',
     scenario: MAIN_SCENARIO,
     hint:
@@ -356,6 +359,8 @@ const TIER_DEFS = [
   {
     key: 'state_ledger',
     name: 'State Ledger',
+    // Opt-in tier - empty output here should not fail the whole test.
+    required: false,
     // State Ledger has its own enable gate combining state_ledger_enabled and profile.
     enabledKey: null,
     scenario: {
@@ -389,6 +394,8 @@ const TIER_DEFS = [
   {
     key: 'epistemic',
     name: 'Perspectives & Secrets',
+    // Opt-in tier - empty output here should not fail the whole test.
+    required: false,
     // Epistemic has its own enable gate combining epistemic_enabled and profile.
     enabledKey: null,
     scenario: {
@@ -432,9 +439,12 @@ const TIER_DEFS = [
  * Runs the fixed test scenario through all extraction tiers regardless of
  * whether each tier is currently enabled. This allows users to evaluate
  * model capability before deciding to enable a tier.
- * Returns per-tier results and the name of the first tier that produced
- * no output (null if all tiers passed), or { cancelled: true } if the
- * caller requested cancellation between tiers.
+ * Returns per-tier results and the name of the first *required* tier
+ * (Long-term Memories, Session Memories, Story Arcs) that produced no
+ * output (null if all required tiers passed), or { cancelled: true } if
+ * the caller requested cancellation between tiers. The optional tiers
+ * (State Ledger, Perspectives & Secrets) are always run and included in
+ * the results, but an empty result from either never fails the test.
  *
  * Tiers are run sequentially to avoid OOM on local models.
  *
@@ -478,9 +488,16 @@ export async function runModelTest(
       scenario: def.scenario,
       items,
       empty: count === 0,
+      required: def.required,
     });
   }
 
-  const failedTier = tiers.find((t) => t.empty);
+  // Only the three core tiers (long-term, session, arcs) can fail the overall
+  // test - State Ledger and Perspectives & Secrets are opt-in features, so an
+  // empty result there just means this model isn't great at that particular
+  // nuance, not that it's unsuitable for Smart Memory generally. Gating the
+  // whole test (and hiding the other tiers' results) on an optional tier was
+  // actively misleading.
+  const failedTier = tiers.find((t) => t.empty && t.required);
   return { tiers, failedTier: failedTier?.name ?? null };
 }

@@ -1255,13 +1255,21 @@ export function bindSettingsUI(ctrl) {
       return;
     }
 
-    // All tiers passed - render paginated tier review.
+    // Core tiers passed - render paginated tier review. Optional tiers (State
+    // Ledger, Perspectives & Secrets) may still be empty without failing the
+    // test - note that in the header rather than hiding the results.
     const tiers = outcome.tiers;
     let current = 0;
+    const emptyOptional = tiers.filter((t) => t.empty && !t.required);
+    const passHeader = emptyOptional.length
+      ? `<i class="fa-solid fa-circle-check"></i> Core tiers returned output. ` +
+        `${emptyOptional.map((t) => t.name).join(', ')} (optional) returned no output - ` +
+        `this model may need a stronger prompt style for that tier specifically.`
+      : '<i class="fa-solid fa-circle-check"></i> All tiers returned output.';
 
     $result.html(`
       <div class="sm_model_test_pass_header">
-        <i class="fa-solid fa-circle-check"></i> All tiers returned output.
+        ${passHeader}
       </div>
       <div id="sm_model_test_tier_area"></div>
     `);

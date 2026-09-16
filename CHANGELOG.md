@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Optional tiers no longer fail the whole extraction model test.** State
+  Ledger and Perspectives & Secrets are opt-in features, but an empty result
+  from either was treated the same as a failure in a core tier - the whole
+  test reported failure and hid the other four tiers' results entirely, even
+  when Long-term Memories, Session Memories, and Story Arcs (the tiers every
+  user actually relies on) all passed. Only those three core tiers can now
+  fail the test; an empty optional tier is shown inline in the pass header
+  instead, and all tier results remain browsable.
 - **Confidence scores no longer appear in relationship entries in profiles.**
   The profile generation prompt requested `[confidence: 0.X]` on each
   relationship line, but no downstream code ever consumed the value. It
