@@ -385,8 +385,14 @@ const TIER_DEFS = [
       const parsed = parseStateCardResponse(response || '');
       const items = [];
       for (const [key, fields] of parsed.entries()) {
-        const fieldParts = Object.entries(fields).map(([k, v]) => `${k}=${v}`);
-        items.push(`[state:${key}] ${fieldParts.join(' | ')}`);
+        // The Map key is an internal "name|type" lookup key (lowercased, for
+        // merging), and fields carries an internal _name field for the
+        // original casing - neither is meant for display. Reconstruct the
+        // proper [state:Name:type] format instead of leaking internals.
+        const type = key.split('|')[1] ?? '';
+        const { _name, ...displayFields } = fields;
+        const fieldParts = Object.entries(displayFields).map(([k, v]) => `${k}=${v}`);
+        items.push(`[state:${_name}:${type}] ${fieldParts.join(' | ')}`);
       }
       return { items, count: items.length };
     },

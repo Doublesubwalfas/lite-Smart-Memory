@@ -27,6 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **State Ledger tier in the extraction model test no longer displays
+  malformed output.** The test's display code reconstructed each result line
+  directly from `parseStateCardResponse`'s internal Map - whose key is a
+  lowercased `name|type` lookup key for merging, and whose fields carry an
+  internal `_name` bookkeeping field for the original casing - instead of
+  converting back to the `[state:Name:type]` format the prompt actually
+  specifies. This made correctly-formatted model output appear broken in the
+  UI (e.g. `[state:kael|character] _name=Kael | location=...` instead of
+  `[state:Kael:character] location=...`), making a model's state extraction
+  quality impossible to judge from the test panel.
 - **State Ledger test scenario no longer contradicts its own extraction
   rules.** The scenario text only ever said Kael reached "the lower
   passage," never "dungeon," while the state extraction prompt's strict
