@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-10-01
+
+### Fixed
+
+- **Editing or deleting a session memory no longer acts on a different
+  memory.** The list is displayed sorted by time, but the edit and delete
+  buttons used the position in that sorted list to index the stored, unsorted
+  array. Edit could open another memory's text, and delete could remove the
+  wrong memory. The buttons now carry the memory's stored position.
+- **Memory text is no longer squeezed into a narrow column.** The text sat on
+  the same row as the type, importance, and expiration badges and the buttons,
+  which on mobile left room for about one letter per line. The text now gets
+  its own full-width row below them. Thanks to Pixie for the CSS.
+- **Read-only mode now explains why delete-message buttons disappear.** The
+  toggle's tooltip and the README say that delete buttons are hidden while it
+  is on, and why.
+
 ## [1.8.2] - 2026-10-01
 
 ### Added

@@ -331,6 +331,8 @@ The **Read-only mode - protect character memories** toggle sits just below the c
 
 Use it to safely explore a risky scene before deciding whether to commit it to the character's history. Or for a completely consequence-free session where nothing changes permanently. When you turn it off, their memories are exactly as you left them before the session.
 
+While read-only is on, SillyTavern's delete-message buttons are hidden. Deleting messages would shift which part of the chat the session covers, so turn read-only off first if you need to delete something.
+
 When you turn read-only off, a dialog asks what to do with the session:
 
 - **Commit** - keeps everything. Session memories are preserved and Smart Memory runs full extraction on the window - long-term memories, arcs, and profiles are built as if read-only had never been active. The messages stay visible.

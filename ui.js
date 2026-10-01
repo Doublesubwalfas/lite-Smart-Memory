@@ -719,7 +719,10 @@ export function updateSessionUI() {
     });
   }
 
-  sortedSession.forEach((mem, idx) => {
+  sortedSession.forEach((mem) => {
+    // Display order is sorted by ts, but edit/delete index into the stored
+    // (unsorted) array, so use the position in that array, not the sorted one.
+    const idx = memories.indexOf(mem);
     const isRetired = Boolean(mem.superseded_by);
     const hasConflict = Array.isArray(mem.contradicts) && mem.contradicts.length > 0;
     const retiredClass = isRetired ? ' sm_memory_retired' : '';

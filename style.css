@@ -493,6 +493,28 @@
   opacity: 1;
 }
 
+/* Badges and buttons share the first row; the memory text gets its own full-width
+   row below them. Inline, the text was squeezed between them, down to one letter
+   per line on mobile. */
+#smart_memory_settings .sm_memory_item:has(> .sm_memory_text, > .sm_memory_edit_input) {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+#smart_memory_settings .sm_memory_item > .sm_memory_text,
+#smart_memory_settings .sm_memory_item > .sm_memory_edit_input {
+  flex: 0 0 100%;
+  order: 99;
+}
+
+#smart_memory_settings .sm_memory_item > .sm_memory_edit_input {
+  box-sizing: border-box;
+}
+
+#smart_memory_settings .sm_memory_item > button:first-of-type {
+  margin-left: auto;
+}
+
 #smart_memory_settings .sm_memory_edit_input {
   flex: 1;
   min-height: 3em;
