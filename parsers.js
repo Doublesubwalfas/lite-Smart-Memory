@@ -26,8 +26,8 @@
  * The consuming modules (arcs.js, compaction.js, continuity.js, longterm.js,
  * scenes.js, session.js) import from here rather than defining their own copies.
  *
- * parseExtractionOutput     - parses [type:score:expiration:entity=...] tagged lines from long-term extraction
- * parseSessionOutput        - parses [type:score:expiration:entity=...] tagged lines from session extraction
+ * parseExtractionOutput     - parses [type:score:expiration:entity=...] tagged lines from long-term extraction; tolerates trailing [score:expiration] appended to content
+ * parseSessionOutput        - parses [type:score:expiration:entity=...] tagged lines from session extraction; tolerates trailing [score:expiration] appended to content
  * parseArcOutput            - parses [arc] / [resolved] tagged lines from arc extraction
  * parseContradictions       - parses contradiction lines from a continuity check response
  * formatSummary             - strips model analysis scaffolding and extracts the summary text
@@ -47,6 +47,32 @@
  */
 
 import { MEMORY_TYPES, SESSION_TYPES, generateMemoryId } from './constants.js';
+
+// ---- Shared helpers -----------------------------------------------------
+
+/**
+ * Strips a trailing metadata tag that some models append to content instead of
+ * embedding in the opening bracket. Matches patterns like `[2:session]`,
+ * `[3:permanent]`, `[2]`, `[session]` at the end of the content string.
+ *
+ * When found, the tag is removed from the content text and the extracted score
+ * and expiration are returned so callers can use them as fallback values when
+ * the bracket modifiers did not supply them.
+ *
+ * @param {string} content - Raw content string, possibly with trailing tag.
+ * @returns {{ content: string, importance: number|null, expiration: string|null }}
+ */
+function stripTrailingTag(content) {
+  // Match an optional score (1/2/3) and/or expiration keyword at the end.
+  // The tag must contain at least one of them to be considered metadata.
+  const m = content.match(/\[\s*(?:([123])\s*:?\s*)?(scene|session|permanent)?\s*\]\s*$/i);
+  if (!m || (!m[1] && !m[2])) return { content, importance: null, expiration: null };
+  return {
+    content: content.slice(0, m.index).trim(),
+    importance: m[1] ? parseInt(m[1], 10) : null,
+    expiration: m[2] ? m[2].toLowerCase() : null,
+  };
+}
 
 // ---- Long-term extraction -----------------------------------------------
 
@@ -76,17 +102,23 @@ export function parseExtractionOutput(text) {
   while ((match = linePattern.exec(text)) !== null) {
     const type = match[1].toLowerCase();
     const modifiers = match[2]; // e.g. ":2:permanent" or ":2:permanent:entity=Senjin,Alex"
-    const content = match[3].trim();
+    const trailing = stripTrailingTag(match[3].trim());
+    const content = trailing.content;
 
     if (!MEMORY_TYPES.includes(type) || content.length <= 5) continue;
 
     // Extract optional score (first standalone 1/2/3 preceded by colon).
+    // Fall back to trailing tag value if the bracket modifiers omitted it.
     const importanceMatch = modifiers.match(/:\s*([123])\b/);
-    const importance = importanceMatch ? parseInt(importanceMatch[1], 10) : 2;
+    const importance = importanceMatch
+      ? parseInt(importanceMatch[1], 10)
+      : (trailing.importance ?? 2);
 
-    // Extract optional expiration keyword.
+    // Extract optional expiration keyword. Fall back to trailing tag value.
     const expirationMatch = modifiers.match(/:\s*(scene|session|permanent)\b/i);
-    const expiration = expirationMatch ? expirationMatch[1].toLowerCase() : 'permanent';
+    const expiration = expirationMatch
+      ? expirationMatch[1].toLowerCase()
+      : (trailing.expiration ?? 'permanent');
 
     // Extract optional entity names list. Stops at the next colon so reordering
     // does not bleed into other fields.
@@ -150,15 +182,20 @@ export function parseSessionOutput(text) {
   while ((match = pattern.exec(text)) !== null) {
     const type = match[1].toLowerCase();
     const modifiers = match[2];
-    const content = match[3].trim();
+    const trailing = stripTrailingTag(match[3].trim());
+    const content = trailing.content;
 
     if (!SESSION_TYPES.includes(type) || content.length <= 3) continue;
 
     const importanceMatch = modifiers.match(/:\s*([123])\b/);
-    const importance = importanceMatch ? parseInt(importanceMatch[1], 10) : 2;
+    const importance = importanceMatch
+      ? parseInt(importanceMatch[1], 10)
+      : (trailing.importance ?? 2);
 
     const expirationMatch = modifiers.match(/:\s*(scene|session|permanent)\b/i);
-    const expiration = expirationMatch ? expirationMatch[1].toLowerCase() : 'session';
+    const expiration = expirationMatch
+      ? expirationMatch[1].toLowerCase()
+      : (trailing.expiration ?? 'session');
 
     const entityMatch = modifiers.match(/entity=([^:[\]]*)/i);
     const rawEntityNames = entityMatch

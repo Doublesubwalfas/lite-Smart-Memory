@@ -209,6 +209,15 @@ let recapSuppressed = false;
 // the recap promise settles (e.g. Ollama drops the request on an error).
 let activeRecapHandle = null;
 
+// Holds a reference to the chatMetadata object the currently-displayed recap
+// overlay belongs to, null when no overlay is showing. Recap generation can
+// take minutes, and SillyTavern can fire CHAT_CHANGED/CHAT_LOADED more than
+// once for a single chat load (common across extensions). Without this check,
+// onChatChangedImpl's unconditional overlay removal at the top of the function
+// would wipe a just-displayed recap seconds after it appears whenever a second
+// event fires for the SAME chat, not just on an actual chat switch.
+let recapOverlayChatMeta = null;
+
 // Set to true by the Cancel button to abort an in-progress catch-up loop.
 let catchUpCancelled = false;
 
@@ -1061,8 +1070,14 @@ async function onChatChangedImpl() {
   resetTrimToastFlag();
 
   // Dismiss any recap overlay from the previous chat immediately - it is modal
-  // and blocks input, so leaving it up over the new chat is confusing.
-  $('#sm_recap_overlay').remove();
+  // and blocks input, so leaving it up over the new chat is confusing. Only
+  // remove it on an actual chat switch - SillyTavern can fire CHAT_CHANGED/
+  // CHAT_LOADED more than once for the same chat load, and a duplicate event
+  // here must not wipe a recap that was just displayed for this same chat.
+  if (recapOverlayChatMeta !== getContext().chatMetadata) {
+    $('#sm_recap_overlay').remove();
+    recapOverlayChatMeta = null;
+  }
 
   messagesSinceLastExtraction = 0;
   messagesSinceLastProfileRegen = 0;
@@ -1164,7 +1179,10 @@ async function onChatChangedImpl() {
               recapSuppressed = false;
               setStatusMessage('');
               if (!stillThisChat || suppressed) return;
-              if (recap) displayRecap(recap, hoursAway);
+              if (recap) {
+                recapOverlayChatMeta = groupChatMeta;
+                displayRecap(recap, hoursAway);
+              }
             })
             .catch((err) => {
               stopActivityLoader(groupRecapHandle);
@@ -1261,6 +1279,7 @@ async function onChatChangedImpl() {
               // Pass hoursAway explicitly - updateLastActive() runs after this
               // async block starts, so getAwayHours() inside displayRecap would
               // return 0 and always show "short break" regardless of actual gap.
+              recapOverlayChatMeta = soloChatMeta;
               displayRecap(recap, hoursAway);
             }
           })
@@ -1986,6 +2005,7 @@ jQuery(async function () {
   // calls that should not dismiss the overlay.
   eventSource.on(event_types.MESSAGE_SENT, () => {
     $('#sm_recap_overlay').remove();
+    recapOverlayChatMeta = null;
     // If a recap is still generating when the message is sent, suppress the
     // popup - showing it after the response arrives would be confusing.
     if (recapRunningForChat !== null) recapSuppressed = true;
@@ -2000,6 +2020,7 @@ jQuery(async function () {
     if (type === 'normal') {
       generationInProgress = true;
       $('#sm_recap_overlay').remove();
+      recapOverlayChatMeta = null;
     }
   });
   eventSource.on(event_types.MESSAGE_RECEIVED, () => {
@@ -2010,6 +2031,7 @@ jQuery(async function () {
   // remotely and the blocking modal is preventing it from responding).
   $(document).on('smart_memory:dismiss_recap', () => {
     $('#sm_recap_overlay').remove();
+    recapOverlayChatMeta = null;
   });
   // Profile B: auto-regenerate canon when the user manually resolves an arc
   // and a summary was successfully generated for it.
@@ -2187,6 +2209,7 @@ jQuery(async function () {
           });
           return 'Recap generation failed.';
         }
+        recapOverlayChatMeta = getContext().chatMetadata;
         displayRecap(recap);
         setStatusMessage('Recap displayed.');
         return recap;

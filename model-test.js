@@ -22,7 +22,9 @@
  * pipeline and returns structured per-tier results for display in the UI.
  *
  * runModelTest               - runs the test against the configured memory LLM;
- *                              accepts an optional isCancelled callback to abort between tiers
+ *                              accepts an optional isCancelled callback to abort between tiers,
+ *                              an optional onProgress callback fired before each tier starts,
+ *                              and an optional onChunk callback for a live streaming preview
  * TEST_CHARACTERS            - characters in the main Yara/Cael scenario
  * TEST_MESSAGES              - messages for the main scenario
  * EPISTEMIC_TEST_CHARACTERS  - characters in the Mira/Sera/Ryn/Dael epistemic scenario
@@ -269,7 +271,7 @@ export const STATE_TEST_ENTITIES = [
 export const STATE_TEST_MESSAGES = [
   {
     name: 'Kael',
-    text: "The graze on my shoulder had stopped bleeding by the time I reached the lower passage. I pulled the guard's cloak tighter - the fit was poor but the badge on the chest was what mattered.",
+    text: "The graze on my shoulder had stopped bleeding by the time I reached the dungeon's lower passage. I pulled the guard's cloak tighter - the fit was poor but the badge on the chest was what mattered.",
   },
   {
     name: 'Kael',
@@ -303,6 +305,7 @@ const TIER_DEFS = [
   {
     key: 'longterm',
     name: 'Long-term Memories',
+    required: true,
     enabledKey: 'longterm_enabled',
     scenario: MAIN_SCENARIO,
     hint:
@@ -319,6 +322,7 @@ const TIER_DEFS = [
   {
     key: 'session',
     name: 'Session Memories',
+    required: true,
     enabledKey: 'session_enabled',
     scenario: MAIN_SCENARIO,
     hint:
@@ -335,6 +339,7 @@ const TIER_DEFS = [
   {
     key: 'arcs',
     name: 'Story Arcs',
+    required: true,
     enabledKey: 'arcs_enabled',
     scenario: MAIN_SCENARIO,
     hint:
@@ -354,6 +359,8 @@ const TIER_DEFS = [
   {
     key: 'state_ledger',
     name: 'State Ledger',
+    // Opt-in tier - empty output here should not fail the whole test.
+    required: false,
     // State Ledger has its own enable gate combining state_ledger_enabled and profile.
     enabledKey: null,
     scenario: {
@@ -378,8 +385,14 @@ const TIER_DEFS = [
       const parsed = parseStateCardResponse(response || '');
       const items = [];
       for (const [key, fields] of parsed.entries()) {
-        const fieldParts = Object.entries(fields).map(([k, v]) => `${k}=${v}`);
-        items.push(`[state:${key}] ${fieldParts.join(' | ')}`);
+        // The Map key is an internal "name|type" lookup key (lowercased, for
+        // merging), and fields carries an internal _name field for the
+        // original casing - neither is meant for display. Reconstruct the
+        // proper [state:Name:type] format instead of leaking internals.
+        const type = key.split('|')[1] ?? '';
+        const { _name, ...displayFields } = fields;
+        const fieldParts = Object.entries(displayFields).map(([k, v]) => `${k}=${v}`);
+        items.push(`[state:${_name}:${type}] ${fieldParts.join(' | ')}`);
       }
       return { items, count: items.length };
     },
@@ -387,6 +400,8 @@ const TIER_DEFS = [
   {
     key: 'epistemic',
     name: 'Perspectives & Secrets',
+    // Opt-in tier - empty output here should not fail the whole test.
+    required: false,
     // Epistemic has its own enable gate combining epistemic_enabled and profile.
     enabledKey: null,
     scenario: {
@@ -430,22 +445,34 @@ const TIER_DEFS = [
  * Runs the fixed test scenario through all extraction tiers regardless of
  * whether each tier is currently enabled. This allows users to evaluate
  * model capability before deciding to enable a tier.
- * Returns per-tier results and the name of the first tier that produced
- * no output (null if all tiers passed), or { cancelled: true } if the
- * caller requested cancellation between tiers.
+ * Returns per-tier results and the name of the first *required* tier
+ * (Long-term Memories, Session Memories, Story Arcs) that produced no
+ * output (null if all required tiers passed), or { cancelled: true } if
+ * the caller requested cancellation between tiers. The optional tiers
+ * (State Ledger, Perspectives & Secrets) are always run and included in
+ * the results, but an empty result from either never fails the test.
  *
  * Tiers are run sequentially to avoid OOM on local models.
  *
  * @param {() => boolean} [isCancelled] - optional callback; return true to abort before the next tier
+ * @param {(current: number, total: number, name: string) => void} [onProgress] - optional callback fired before each tier starts, 1-indexed
+ * @param {(snapshot: {content: string, thinking: string}) => void} [onChunk] - optional streaming preview callback, forwarded to generateMemoryExtract; only takes effect for the Ollama and local OpenAI Compatible sources
  * @returns {Promise<{tiers: Array, failedTier: string|null, cancelled?: boolean}>}
  */
-export async function runModelTest(isCancelled = () => false) {
+export async function runModelTest(
+  isCancelled = () => false,
+  onProgress = () => {},
+  onChunk = null,
+) {
   const chatHistory = TEST_MESSAGES.map((m) => `${m.name}: ${m.text}`).join('\n\n');
 
   const tiers = [];
 
-  for (const def of TIER_DEFS) {
+  for (let i = 0; i < TIER_DEFS.length; i++) {
+    const def = TIER_DEFS[i];
     if (isCancelled()) return { tiers, failedTier: null, cancelled: true };
+
+    onProgress(i + 1, TIER_DEFS.length, def.name);
 
     // Epistemic and State Ledger tiers use their own test scenarios.
     // All other tiers use the shared chat history.
@@ -453,7 +480,10 @@ export async function runModelTest(isCancelled = () => false) {
     smLog(
       `[ModelTest] Prompt length for "${def.name}": ${prompt.length} chars (~${Math.round(prompt.length / 4)} tokens)`,
     );
-    const response = await generateMemoryExtract(prompt, { responseLength: def.responseLength });
+    const response = await generateMemoryExtract(prompt, {
+      responseLength: def.responseLength,
+      onChunk,
+    });
     smLog(`[ModelTest] Raw response for tier "${def.name}":`, response);
     const { items, count } = def.parse(response);
 
@@ -464,9 +494,16 @@ export async function runModelTest(isCancelled = () => false) {
       scenario: def.scenario,
       items,
       empty: count === 0,
+      required: def.required,
     });
   }
 
-  const failedTier = tiers.find((t) => t.empty);
+  // Only the three core tiers (long-term, session, arcs) can fail the overall
+  // test - State Ledger and Perspectives & Secrets are opt-in features, so an
+  // empty result there just means this model isn't great at that particular
+  // nuance, not that it's unsuitable for Smart Memory generally. Gating the
+  // whole test (and hiding the other tiers' results) on an optional tier was
+  // actively misleading.
+  const failedTier = tiers.find((t) => t.empty && t.required);
   return { tiers, failedTier: failedTier?.name ?? null };
 }

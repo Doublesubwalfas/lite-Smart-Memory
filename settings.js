@@ -1193,12 +1193,50 @@ export function bindSettingsUI(ctrl) {
     $result
       .show()
       .html(
-        '<div class="sm_model_test_running"><i class="fa-solid fa-spinner fa-spin"></i> Running extraction test...</div>',
+        '<div class="sm_model_test_running"><i class="fa-solid fa-spinner fa-spin"></i> Running extraction test...</div>' +
+          '<div class="sm_model_test_preview_wrap" hidden>' +
+          '<div class="sm_model_test_preview_header">Thinking</div>' +
+          '<div class="sm_model_test_preview"></div>' +
+          '</div>',
       );
+
+    // Live preview during streaming (Ollama and local OpenAI Compatible only - see
+    // generateMemoryExtract). Throttled to avoid flooding the DOM with per-token
+    // updates on fast local models. Only shown for thinking models - a model with
+    // no thinking output gets no preview at all, since the point is watching
+    // reasoning for repetition/loops, not narrating final output token-by-token.
+    // The box scrolls to its own bottom on every update so the newest tokens stay
+    // visible instead of being clipped by the fixed-height overflow.
+    let lastPreviewUpdate = 0;
+    const PREVIEW_THROTTLE_MS = 150;
+    const PREVIEW_TAIL_CHARS = 400;
+    const onChunk = ({ thinking }) => {
+      if (!thinking) return;
+      const now = Date.now();
+      if (now - lastPreviewUpdate < PREVIEW_THROTTLE_MS) return;
+      lastPreviewUpdate = now;
+      const tail =
+        thinking.length > PREVIEW_TAIL_CHARS ? thinking.slice(-PREVIEW_TAIL_CHARS) : thinking;
+      $result.find('.sm_model_test_preview_wrap').prop('hidden', false);
+      const $preview = $result.find('.sm_model_test_preview').text(`…${tail}`);
+      $preview.scrollTop($preview[0].scrollHeight);
+    };
 
     let outcome;
     try {
-      outcome = await runModelTest(() => !modelTestRunning);
+      outcome = await runModelTest(
+        () => !modelTestRunning,
+        (current, total, name) => {
+          $result
+            .find('.sm_model_test_running')
+            .html(
+              `<i class="fa-solid fa-spinner fa-spin"></i> Running extraction test... (${current}/${total}: ${name})`,
+            );
+          $result.find('.sm_model_test_preview_wrap').prop('hidden', true);
+          $result.find('.sm_model_test_preview').text('');
+        },
+        onChunk,
+      );
     } catch (err) {
       console.error('[SmartMemory] Model test failed:', err);
       $result.html(
@@ -1226,13 +1264,21 @@ export function bindSettingsUI(ctrl) {
       return;
     }
 
-    // All tiers passed - render paginated tier review.
+    // Core tiers passed - render paginated tier review. Optional tiers (State
+    // Ledger, Perspectives & Secrets) may still be empty without failing the
+    // test - note that in the header rather than hiding the results.
     const tiers = outcome.tiers;
     let current = 0;
+    const emptyOptional = tiers.filter((t) => t.empty && !t.required);
+    const passHeader = emptyOptional.length
+      ? `<i class="fa-solid fa-circle-check"></i> Core tiers returned output. ` +
+        `${emptyOptional.map((t) => t.name).join(', ')} (optional) returned no output - ` +
+        `this model may need a stronger prompt style for that tier specifically.`
+      : '<i class="fa-solid fa-circle-check"></i> All tiers returned output.';
 
     $result.html(`
       <div class="sm_model_test_pass_header">
-        <i class="fa-solid fa-circle-check"></i> All tiers returned output.
+        ${passHeader}
       </div>
       <div id="sm_model_test_tier_area"></div>
     `);

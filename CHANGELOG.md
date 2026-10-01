@@ -7,6 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-10-01
+
+### Added
+
+- **Per-tier progress in the extraction model test.** The "Test Extraction
+  Model" panel previously showed only a static spinner for the entire run,
+  giving no indication of which of the five tiers was in progress or how
+  many remained. Slow local models can take several minutes per tier, so the
+  spinner now shows "(current/total: tier name)" and updates as each tier
+  starts.
+- **Live streaming preview in the extraction model test.** For the Ollama and
+  local OpenAI Compatible sources, the test panel now streams the model's
+  response as it generates and shows a live, auto-scrolling tail of its
+  thinking beneath the progress spinner, under a "Thinking" header. This lets
+  a stuck or looping model be spotted while it is still generating instead of
+  only after it times out or exhausts its token budget. Only shown for
+  thinking models - a model with no reasoning output gets no preview box at
+  all. Production extraction is unaffected - it still runs non-streaming as
+  before.
+
+### Fixed
+
+- **Thinking models no longer return empty extractions on the main API,
+  connection profile, and WebLLM sources.** Each tier requested only its own
+  small response length (300-600 tokens) as max_tokens, so a thinking model
+  spent the whole allowance on reasoning and stopped on "length" with no
+  output. The generation budget is now used as a floor on these paths, the
+  same as Ollama and OpenAI Compatible already did. Unlimited (-1) sends no
+  cap. (#7)
+- **Reasoning blocks no longer leak into scene history, relationship history,
+  and contextual triggers on the main API.** generateRaw does not strip
+  reasoning for text completion backends (e.g. Gemma 4 on KoboldCpp), so the
+  `<|channel>thought` block ended up in stored memories. Reasoning is now
+  stripped on every source. (#8)
+- **Away recap no longer disappears seconds after appearing.** Recap
+  generation can take minutes, and SillyTavern can fire `CHAT_CHANGED` and
+  `CHAT_LOADED` more than once for a single chat load. `onChatChangedImpl`
+  unconditionally removed any visible recap overlay on every run, so a
+  second load event for the same chat - arriving any time after the recap
+  finally displayed - would wipe it almost immediately, often before it
+  could be read. The overlay is now only removed on an actual chat switch.
+- **State Ledger tier in the extraction model test no longer displays
+  malformed output.** The test's display code reconstructed each result line
+  directly from `parseStateCardResponse`'s internal Map - whose key is a
+  lowercased `name|type` lookup key for merging, and whose fields carry an
+  internal `_name` bookkeeping field for the original casing - instead of
+  converting back to the `[state:Name:type]` format the prompt actually
+  specifies. This made correctly-formatted model output appear broken in the
+  UI (e.g. `[state:kael|character] _name=Kael | location=...` instead of
+  `[state:Kael:character] location=...`), making a model's state extraction
+  quality impossible to judge from the test panel.
+- **State Ledger test scenario no longer contradicts its own extraction
+  rules.** The scenario text only ever said Kael reached "the lower
+  passage," never "dungeon," while the state extraction prompt's strict
+  rules explicitly forbid inferring an entity's location rather than
+  reading it directly from the text - and the test's own expected answer
+  required exactly that inference (`location=dungeon interior`). A careful
+  reasoning model correctly noticed this contradiction and could spend a
+  very long time deliberating over it rather than producing garbled or
+  incorrect output; less careful models just silently guessed the intended
+  answer. Kael's opening line now explicitly mentions the dungeon, so the
+  location is directly stated and no inference is required.
+- **Optional tiers no longer fail the whole extraction model test.** State
+  Ledger and Perspectives & Secrets are opt-in features, but an empty result
+  from either was treated the same as a failure in a core tier - the whole
+  test reported failure and hid the other four tiers' results entirely, even
+  when Long-term Memories, Session Memories, and Story Arcs (the tiers every
+  user actually relies on) all passed. Only those three core tiers can now
+  fail the test; an empty optional tier is shown inline in the pass header
+  instead, and all tier results remain browsable.
+- **Confidence scores no longer appear in relationship entries in profiles.**
+  The profile generation prompt requested `[confidence: 0.X]` on each
+  relationship line, but no downstream code ever consumed the value. It
+  appeared verbatim in the injected context, cluttering the roleplay LLM's
+  input. Removed from the prompt; existing profiles will drop the scores
+  naturally as they regenerate.
+- **Trailing metadata tags no longer appear in memory content.** Some models
+  append score and expiration after the content text (e.g. `[detail] Content.[2:session]`)
+  instead of embedding them in the opening bracket. The parser now strips these
+  trailing tags and folds the values in correctly, so they never reach stored
+  memory text.
+
 ## [1.8.1] - 2026-07-02
 
 ### Added
