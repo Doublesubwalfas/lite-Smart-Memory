@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-10-01
+
 ### Fixed
 
 - **Editing or deleting a session memory no longer acts on a different
