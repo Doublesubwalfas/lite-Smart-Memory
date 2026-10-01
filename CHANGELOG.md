@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-10-01
+
 ### Added
 
 - **Per-tier progress in the extraction model test.** The "Test Extraction
