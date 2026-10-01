@@ -60,6 +60,21 @@ function getGenerationBudget() {
 }
 
 /**
+ * Returns the max_tokens value to request for a call that asked for responseLength.
+ * Per-call lengths (300-600) are sized for the visible output only, so a thinking
+ * model can burn the whole allowance on reasoning and return nothing. The generation
+ * budget is used as a floor, matching what the Ollama and OpenAI-compat paths already
+ * request. Returns 0 when the budget is unlimited (-1), meaning "send no cap".
+ * @param {number} responseLength
+ * @returns {number}
+ */
+function getRequestLimit(responseLength) {
+  const budget = getGenerationBudget();
+  if (budget === -1) return 0;
+  return Math.max(responseLength || 0, budget);
+}
+
+/**
  * Holds the AbortController for the currently running Ollama or OpenAI-compat
  * fetch, or null when no external generation is in progress. This is module-level
  * rather than per-call so index.js can cancel it from outside the call stack via
@@ -77,8 +92,8 @@ let memoryAbortController = null;
  * supported automatically when ST adds templates for them, without any
  * changes needed here.
  *
- * Only applied on Ollama and OpenAI-compatible paths - the main API path
- * goes through ST's own pipeline which already strips reasoning blocks.
+ * Applied on every extraction path, since generateRaw on the main API does not
+ * strip reasoning for text completion backends.
  *
  * @param {string} text
  * @returns {string}
@@ -466,16 +481,22 @@ export async function generateMemoryExtract(prompt, { responseLength = 600, onCh
   } else if (source === memory_sources.openai_compatible) {
     raw = await generateOpenAICompat(prompt, [], undefined, onChunk);
   } else if (source === memory_sources.connection_profile) {
-    raw = await generateWithConnectionProfile(prompt, [], responseLength);
+    raw = await generateWithConnectionProfile(prompt, [], getRequestLimit(responseLength));
   } else if (source === memory_sources.webllm) {
     if (!isWebLlmSupported()) {
       console.warn(
         `[${MODULE_NAME}] WebLLM source selected but WebLLM is not available, falling back to main`,
       );
-      raw = await generateRaw({ prompt, instruct: false, quietToLoud: false, responseLength });
+      raw = await generateRaw({
+        prompt,
+        instruct: false,
+        quietToLoud: false,
+        responseLength: getRequestLimit(responseLength) || null,
+      });
     } else {
       const messages = [{ role: 'user', content: prompt }];
-      const params = responseLength > 0 ? { max_tokens: responseLength } : {};
+      const limit = getRequestLimit(responseLength);
+      const params = limit > 0 ? { max_tokens: limit } : {};
       raw = await generateWebLlmChatPrompt(messages, params);
     }
   } else {
@@ -485,13 +506,18 @@ export async function generateMemoryExtract(prompt, { responseLength = 600, onCh
     // generateRaw parameter in SillyTavern. The parsers are also resilient -
     // they only match valid tagged lines and ignore everything else - so even
     // if this were silently ignored the output would still parse correctly.
-    raw = await generateRaw({ prompt, instruct: false, quietToLoud: false, responseLength });
+    raw = await generateRaw({
+      prompt,
+      instruct: false,
+      quietToLoud: false,
+      responseLength: getRequestLimit(responseLength) || null,
+    });
   }
 
-  // Main API path: ST already strips reasoning blocks in its own pipeline.
-  // All other paths (Ollama, OpenAI-compat, connection profile, WebLLM) bypass ST, so we strip here.
-  const needsStrip = source !== memory_sources.main;
-  const stripped = needsStrip ? stripThinkingBlocks(raw ?? '') : (raw ?? '');
+  // Strip on every path, main API included: generateRaw does not remove reasoning
+  // blocks on text completion backends (e.g. KoboldCpp with Gemma 4), and stripping
+  // already-clean text is a no-op.
+  const stripped = stripThinkingBlocks(raw ?? '');
   // Truncate to responseLength characters as a rough bound - the thinking block
   // may have inflated the raw output far beyond the intended budget.
   // 4 chars/token is a conservative estimate; actual token count may be lower.
@@ -580,7 +606,11 @@ export async function generateMemorySummarize(
     if (source === memory_sources.ollama) {
       rawDirect = await generateOllama(quietPrompt, priorMessages);
     } else if (source === memory_sources.connection_profile) {
-      rawDirect = await generateWithConnectionProfile(quietPrompt, priorMessages, responseLength);
+      rawDirect = await generateWithConnectionProfile(
+        quietPrompt,
+        priorMessages,
+        getRequestLimit(responseLength),
+      );
     } else {
       rawDirect = await generateOpenAICompat(quietPrompt, priorMessages);
     }
@@ -615,8 +645,9 @@ export async function generateMemorySummarize(
         }));
       const trimmed = trimToBudget(allMessages, getMaxContextSize(responseLength) * 0.6);
       trimmed.push({ role: 'user', content: quietPrompt });
-      const params = responseLength > 0 ? { max_tokens: responseLength } : {};
-      return await generateWebLlmChatPrompt(trimmed, params);
+      const limit = getRequestLimit(responseLength);
+      const params = limit > 0 ? { max_tokens: limit } : {};
+      return stripThinkingBlocks((await generateWebLlmChatPrompt(trimmed, params)) ?? '');
     }
   }
 
@@ -625,7 +656,7 @@ export async function generateMemorySummarize(
     quietPrompt,
     quietToLoud: false,
     skipWIAN,
-    responseLength,
+    responseLength: getRequestLimit(responseLength) || null,
     removeReasoning: true,
   });
 }

@@ -27,6 +27,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Thinking models no longer return empty extractions on the main API,
+  connection profile, and WebLLM sources.** Each tier requested only its own
+  small response length (300-600 tokens) as max_tokens, so a thinking model
+  spent the whole allowance on reasoning and stopped on "length" with no
+  output. The generation budget is now used as a floor on these paths, the
+  same as Ollama and OpenAI Compatible already did. Unlimited (-1) sends no
+  cap. (#7)
+- **Reasoning blocks no longer leak into scene history, relationship history,
+  and contextual triggers on the main API.** generateRaw does not strip
+  reasoning for text completion backends (e.g. Gemma 4 on KoboldCpp), so the
+  `<|channel>thought` block ended up in stored memories. Reasoning is now
+  stripped on every source. (#8)
 - **Away recap no longer disappears seconds after appearing.** Recap
   generation can take minutes, and SillyTavern can fire `CHAT_CHANGED` and
   `CHAT_LOADED` more than once for a single chat load. `onChatChangedImpl`
