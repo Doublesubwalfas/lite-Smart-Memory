@@ -1,0 +1,19 @@
+{
+  "name": "smart-memory",
+  "version": "1.8.3",
+  "type": "module",
+  "description": "Smart Memory - SillyTavern extension",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "test": "node test-harness.mjs",
+    "test:live": "node test-harness.mjs --live",
+    "test:parsers": "node test-harness.mjs --parsers"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "markdownlint-cli2": "^0.17.0",
+    "prettier": "^3.8.1"
+  }
+}

@@ -1,0 +1,391 @@
+/**
+ * Smart Memory - SillyTavern Extension
+ * Copyright (C) 2026 Senjin the Dragon
+ * https://github.com/senjinthedragon/Smart-Memory
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * State Ledger: structured current-state snapshots for tracked entities.
+ *
+ * Tracks mutable physical/operational state for characters, objects, places,
+ * and factions. Stored in chatMetadata (chat-scoped, not persistent across
+ * chats). Separate from entity registry objects to avoid clobbering during
+ * reconciliation passes - coupled via merge, delete, and type-change handlers.
+ *
+ * isStateLedgerEnabled        - returns true when the feature is active for the current profile
+ * loadStateLedger             - returns the full ledger map from chatMetadata
+ * saveStateLedger             - persists the ledger to chatMetadata
+ * getStateCard                - returns the fields object for a given entity, or null
+ * setStateCard                - upserts a state card into the ledger
+ * deleteStateCard             - removes a state card entry
+ * migrateStateLedgerKey       - migrates a state card to a new key after a type change
+ * clearStateLedger            - empties the entire ledger
+ * runStateCardExtraction      - runs the extraction pass for the current message window
+ * injectStateLedger           - pushes the current-state block into the prompt
+ * loadAndInjectStateLedger    - restores and re-injects on chat load
+ */
+
+import {
+  setExtensionPrompt,
+  extension_prompt_types,
+  extension_prompt_roles,
+} from '../../../../script.js';
+import { getContext, extension_settings } from '../../../extensions.js';
+import { MODULE_NAME, META_KEY, PROMPT_KEY_STATE_LEDGER, estimateTokens } from './constants.js';
+import { buildStateCardPrompt } from './prompts.js';
+import { parseStateCardResponse } from './parsers.js';
+import { loadCharacterEntityRegistry, loadSessionEntityRegistry } from './graph-migration.js';
+import { generateMemoryExtract } from './generate.js';
+import { smLog } from './logging.js';
+import { invalidateUnifiedCache } from './unified-inject.js';
+import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
+import { reportTierTrimStats } from './trim-stats.js';
+
+// ---- Field schema -----------------------------------------------------------
+
+/**
+ * Ordered field names per entity type. Order determines injection sequence -
+ * the most salient fields appear first.
+ */
+export const STATE_CARD_FIELDS = {
+  character: ['location', 'injuries', 'outfit_disguise', 'mood', 'active_goal', 'carried_items'],
+  object: ['owner', 'location', 'condition', 'status'],
+  place: ['occupants', 'hazards', 'political_control', 'damage', 'accessibility'],
+  faction: ['leadership', 'objective', 'alliances', 'hostility_level'],
+};
+
+/** Entity types that can carry a state card. Concept and unknown are excluded. */
+export const STATE_CARD_TYPES = new Set(['character', 'object', 'place', 'faction']);
+
+/**
+ * Builds the chatMetadata key for a given entity name and type.
+ * @param {string} name
+ * @param {string} type
+ * @returns {string}
+ */
+function ledgerKey(name, type) {
+  return `${name.toLowerCase().trim()}|${type}`;
+}
+
+// ---- Feature gate -----------------------------------------------------------
+
+/**
+ * Returns true when state ledger extraction is active.
+ *
+ * @returns {boolean}
+ */
+export function isStateLedgerEnabled() {
+  const s = extension_settings[MODULE_NAME];
+  if (!s) return false;
+  return !!s.state_ledger_enabled;
+}
+
+// ---- Storage ----------------------------------------------------------------
+
+/**
+ * Returns the full state ledger map from chatMetadata.
+ * Keys are `name|type`; values are field objects.
+ *
+ * @returns {Object}
+ */
+export function loadStateLedger() {
+  const context = getContext();
+  return context.chatMetadata?.[META_KEY]?.state_ledger ?? {};
+}
+
+/**
+ * Persists the full state ledger map to chatMetadata.
+ *
+ * @param {Object} ledger
+ * @returns {Promise<void>}
+ */
+export async function saveStateLedger(ledger) {
+  const context = getContext();
+  if (!context.chatMetadata) context.chatMetadata = {};
+  if (!context.chatMetadata[META_KEY]) context.chatMetadata[META_KEY] = {};
+  context.chatMetadata[META_KEY].state_ledger = ledger;
+  await context.saveMetadata();
+}
+
+/**
+ * Returns the fields object for the given entity, or null if no card exists.
+ *
+ * @param {string} name
+ * @param {string} type
+ * @returns {Object|null}
+ */
+export function getStateCard(name, type) {
+  const ledger = loadStateLedger();
+  return ledger[ledgerKey(name, type)] ?? null;
+}
+
+/**
+ * Upserts a state card into the ledger. Merges fields on top of any existing
+ * card rather than replacing it - sparse update semantics.
+ *
+ * @param {string} name
+ * @param {string} type
+ * @param {Object} fields - Partial or full field object for this entity type.
+ * @returns {Promise<void>}
+ */
+export async function setStateCard(name, type, fields) {
+  const ledger = loadStateLedger();
+  const key = ledgerKey(name, type);
+  ledger[key] = { ...(ledger[key] ?? {}), ...fields };
+  await saveStateLedger(ledger);
+}
+
+/**
+ * Removes the state card for the given entity from the ledger.
+ * No-op if the entity has no card.
+ *
+ * @param {string} name
+ * @param {string} type
+ * @returns {Promise<void>}
+ */
+export async function deleteStateCard(name, type) {
+  const ledger = loadStateLedger();
+  const key = ledgerKey(name, type);
+  if (!(key in ledger)) return;
+  delete ledger[key];
+  await saveStateLedger(ledger);
+}
+
+/**
+ * Migrates a state card to a new key when an entity's type is changed.
+ * The card's field values are preserved as-is - the new type's schema may
+ * differ but free-text fields carry over without loss.
+ *
+ * @param {string} name
+ * @param {string} oldType
+ * @param {string} newType
+ * @returns {Promise<void>}
+ */
+export async function migrateStateLedgerKey(name, oldType, newType) {
+  const ledger = loadStateLedger();
+  const oldKey = ledgerKey(name, oldType);
+  if (!(oldKey in ledger)) return;
+  // If the new type is not a state-card type (e.g. 'concept', 'unknown'),
+  // discard the card rather than storing it under an unreachable key.
+  if (!STATE_CARD_TYPES.has(newType)) {
+    delete ledger[oldKey];
+  } else {
+    const newKey = ledgerKey(name, newType);
+    ledger[newKey] = ledger[oldKey];
+    delete ledger[oldKey];
+  }
+  await saveStateLedger(ledger);
+}
+
+/**
+ * Empties the entire state ledger. Called on Fresh Start and Clear Memories.
+ *
+ * @returns {Promise<void>}
+ */
+export async function clearStateLedger() {
+  await saveStateLedger({});
+}
+
+// ---- Extraction -------------------------------------------------------------
+
+/**
+ * Runs the state card extraction pass for the current message window.
+ *
+ * Builds an entity list from both LT and session registries, runs the model
+ * against the recent messages, parses the response, and merges the results
+ * into the stored ledger as sparse updates.
+ *
+ * @param {string|null} characterName - Card character name for LT registry lookup.
+ * @param {Object[]} messages - Recent messages to extract state from.
+ * @param {Function|null} [abortCheck] - Optional zero-arg function; if it returns true the write is skipped (chat switched).
+ * @returns {Promise<number>} Number of entity cards updated.
+ */
+export async function runStateCardExtraction(characterName, messages, abortCheck = null) {
+  if (!isStateLedgerEnabled()) return 0;
+
+  try {
+    const chatExcerpt = messages
+      .filter((m) => m.mes && !m.is_system)
+      .map((m) => `${m.name}: ${m.mes}`)
+      .join('\n\n');
+
+    if (!chatExcerpt.trim()) return 0;
+
+    // Build entity list from both registries, filtered to types in scope.
+    const ltEntities = characterName ? loadCharacterEntityRegistry(characterName) : [];
+    const sessionEntities = loadSessionEntityRegistry();
+    const seen = new Set();
+    const entityList = [];
+    for (const e of [...ltEntities, ...sessionEntities]) {
+      if (!STATE_CARD_TYPES.has(e.type)) continue;
+      const k = ledgerKey(e.name, e.type);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      entityList.push({ name: e.name, type: e.type });
+    }
+
+    if (entityList.length === 0) return 0;
+
+    const prompt = buildStateCardPrompt(chatExcerpt, entityList);
+
+    const response = await generateMemoryExtract(prompt, { responseLength: 400 });
+    smLog('[SmartMemory] State ledger raw response:', response);
+
+    if (!response || response.trim().toUpperCase() === 'NONE') return 0;
+
+    const updates = parseStateCardResponse(response);
+    if (updates.size === 0) {
+      smLog('[SmartMemory] State ledger extraction produced no parseable updates.');
+      return 0;
+    }
+
+    // Merge updates into the existing ledger.
+    if (abortCheck?.()) return 0;
+    const ledger = loadStateLedger();
+    let count = 0;
+    for (const [key, fields] of updates) {
+      ledger[key] = { ...(ledger[key] ?? {}), ...fields };
+      count++;
+    }
+    await saveStateLedger(ledger);
+
+    smLog(`[SmartMemory] State ledger: updated ${count} entity cards.`);
+    return count;
+  } catch (err) {
+    smLog('[SmartMemory] State ledger extraction failed:', err.message);
+    return 0;
+  }
+}
+
+// ---- Injection --------------------------------------------------------------
+
+/**
+ * Formats one line per entity with non-empty fields, grouped by type.
+ * Returns an empty string when the ledger is empty.
+ *
+ * @param {Object} ledger - The full state ledger map.
+ * @returns {string}
+ */
+function buildStateLedgerBlock(ledger) {
+  const entries = Object.entries(ledger);
+  if (entries.length === 0) return '';
+
+  // Group by type for a readable block.
+  const byType = {};
+  for (const [key, fields] of entries) {
+    const [name, type] = key.split('|');
+    if (!name || !type || !STATE_CARD_TYPES.has(type)) continue;
+    const schema = STATE_CARD_FIELDS[type];
+    if (!schema) continue;
+    const values = schema.map((f) => fields[f]).filter((v) => v && v.trim());
+    if (values.length === 0) continue;
+    const displayName = fields._name || name;
+    const line = `${displayName} [${type}]: ${values.join(' | ')}`;
+    if (!byType[type]) byType[type] = [];
+    byType[type].push(line);
+  }
+
+  const lines = [];
+  for (const type of ['character', 'object', 'place', 'faction']) {
+    if (byType[type]) lines.push(...byType[type]);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Injects the state ledger block into the prompt.
+ * Clears the slot when the feature is disabled or the ledger is empty.
+ *
+ * @param {boolean} [updateTelemetry=false] - Whether to update the token usage bar.
+ */
+export function injectStateLedger(updateTelemetry = false) {
+  const settings = extension_settings[MODULE_NAME];
+
+  const clear = () => {
+    setMacroContent(MACRO_NAMES.state_ledger, '');
+    setExtensionPrompt(PROMPT_KEY_STATE_LEDGER, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_STATE_LEDGER);
+    if (updateTelemetry) updateStateLedgerTelemetry(0);
+  };
+
+  if (!isStateLedgerEnabled()) {
+    clear();
+    return;
+  }
+
+  const ledger = loadStateLedger();
+  const block = buildStateLedgerBlock(ledger);
+
+  if (!block) {
+    clear();
+    return;
+  }
+
+  // Apply token budget cap.
+  const budget = settings.state_ledger_inject_budget ?? 200;
+  let content = block;
+  const fullTokens = estimateTokens(content);
+  if (fullTokens > budget) {
+    const blockLines = content.split('\n');
+    while (blockLines.length > 1 && estimateTokens(blockLines.join('\n')) > budget) {
+      blockLines.pop();
+    }
+    content = blockLines.join('\n');
+  }
+  reportTierTrimStats(PROMPT_KEY_STATE_LEDGER, estimateTokens(content), fullTokens);
+
+  setMacroContent(MACRO_NAMES.state_ledger, content);
+  if (isMacroActive(MACRO_NAMES.state_ledger)) {
+    setExtensionPrompt(PROMPT_KEY_STATE_LEDGER, '', extension_prompt_types.NONE, 0);
+    invalidateUnifiedCache(PROMPT_KEY_STATE_LEDGER);
+  } else {
+    setExtensionPrompt(
+      PROMPT_KEY_STATE_LEDGER,
+      content,
+      settings.state_ledger_position ?? extension_prompt_types.IN_CHAT,
+      settings.state_ledger_depth ?? 1,
+      false,
+      settings.state_ledger_role ?? extension_prompt_roles.SYSTEM,
+    );
+  }
+
+  invalidateUnifiedCache(PROMPT_KEY_STATE_LEDGER);
+  if (updateTelemetry) updateStateLedgerTelemetry(estimateTokens(content));
+}
+
+/**
+ * Restores and re-injects the state ledger on chat load or character change.
+ * No extraction is run - only the stored ledger is re-injected.
+ */
+export function loadAndInjectStateLedger() {
+  injectStateLedger(false);
+}
+
+// ---- Telemetry (token usage bar) --------------------------------------------
+
+/**
+ * Updates the state ledger slice of the token usage bar.
+ * No-op when the bar element is not present in the DOM.
+ *
+ * @param {number} tokens - Estimated token count of the injected block.
+ */
+function updateStateLedgerTelemetry(tokens) {
+  const el = document.querySelector('.sm-token-bar-state_ledger');
+  if (!el) return;
+  el.style.setProperty('--sm-tokens', tokens);
+  el.setAttribute('data-tokens', tokens);
+}

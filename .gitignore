@@ -1,0 +1,18 @@
+# Claude Code session data and developer notes
+.claude/
+CLAUDE.md
+
+# Internal planning documents - not for public distribution
+dev/
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment / secrets
+.env
+.env.*
+
+# OS artifacts
+.DS_Store
+Thumbs.db

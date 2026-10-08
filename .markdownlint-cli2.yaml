@@ -1,0 +1,10 @@
+config:
+  # Disable line-length rule - documentation prose shouldn't be hard-wrapped at 80 chars
+  MD013: false
+  # Allow duplicate headings across different sections - required for CHANGELOG
+  # which repeats "### Fixed", "### Added" etc. under each version heading
+  MD024:
+    siblings_only: true
+  # Allow HTML tables for side-by-side screenshot layouts in README
+  MD033:
+    allowed_elements: [table, tr, td, img, br, em]
