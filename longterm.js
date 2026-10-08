@@ -99,7 +99,13 @@ import {
 } from './memory-utils.js';
 import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
 import { smLog } from './logging.js';
-import { getRecord, patchRecord, deleteRecord, persistRecords } from './scope.js';
+import {
+  getRecord,
+  patchRecord,
+  deleteRecord,
+  persistRecords,
+  resolveCharacterCard,
+} from './scope.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { getSceneParticipants } from './scenes.js';
@@ -627,7 +633,7 @@ export async function extractAndStoreMemories(characterName, recentMessages, sta
 
       // Extract the character card description for seeding new pairs.
       const relContext = getContext();
-      const cardChar = relContext.characters?.find((c) => c.name === characterName);
+      const cardChar = resolveCharacterCard(characterName);
       const cardExcerpt = cardChar?.description ?? '';
 
       try {

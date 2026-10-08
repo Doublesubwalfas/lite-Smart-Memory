@@ -82,6 +82,7 @@ import {
   filterTriggersByFrequency,
 } from './memory-utils.js';
 import { smLog } from './logging.js';
+import { resolveActiveName } from './scope.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
@@ -318,7 +319,7 @@ export async function extractSessionMemories(recentMessages, abortCheck = null) 
     // In group chats there is no single authoritative character, so skip this
     // hint rather than arbitrarily biasing toward one member's long-term store.
     const isGroup = !!getContext().groupId;
-    const characterName = isGroup ? null : getContext().name2 || getContext().characterName || null;
+    const characterName = isGroup ? null : resolveActiveName();
     const longtermMemories = characterName ? loadCharacterMemories(characterName) : [];
     const longtermText =
       longtermMemories.length > 0 ? formatMemoriesForPrompt(longtermMemories.slice(0, 15)) : '';

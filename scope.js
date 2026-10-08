@@ -46,6 +46,8 @@
  * deleteRecord              - remove a per-speaker record
  * persistRecords            - save whichever backing store was just written
  * resolveCharacterName      - stable active-character name for the current chat
+ * resolveCharacterCard      - the actual card object for a speaker, never a same-named lookalike
+ * resolveActiveName         - resolveCharacterName with the group/legacy name2 fallback
  * importLegacyRecord        - one-time copy of a legacy global record into this chat
  */
 
@@ -220,6 +222,60 @@ export function resolveCharacterName() {
     persistRecords();
   }
   return name;
+}
+
+/**
+ * Returns the card object that belongs to a speaker in the current chat.
+ *
+ * Looking a card up by name alone is unsafe: libraries routinely hold several
+ * cards with the same display name, and context.name2 can lag or drift. The
+ * lookup is therefore anchored to identity instead:
+ *
+ *   1:1 chat    - the card bound to this chat (by avatar), else context.characterId.
+ *                 The chat has exactly one card, so `name` is not used to pick it.
+ *   group chat  - the group's own members only, matched by name, so a same-named
+ *                 card elsewhere in the library can never be returned.
+ *   otherwise   - first card with a matching name, as a last resort.
+ *
+ * @param {string|null} [name] - Speaker name; only used for group chats and the fallback.
+ * @returns {Object|null}
+ */
+export function resolveCharacterCard(name) {
+  const context = getContext();
+  const chars = context?.characters ?? [];
+  if (chars.length === 0) return null;
+
+  if (context.groupId) {
+    const group = context.groups?.find((g) => g.id === context.groupId);
+    const members = group?.members ?? [];
+    const inGroup = chars.filter((c) => members.includes(c.avatar));
+    return (
+      inGroup.find((c) => c.name === name) ?? (name ? chars.find((c) => c.name === name) : null) ?? null
+    );
+  }
+
+  // Establishes (or re-validates) the chat's binding as a side effect.
+  resolveCharacterName();
+  const bound = context.chatMetadata?.[META_KEY]?.boundCharacter;
+  if (bound?.avatar) {
+    const byAvatar = chars.find((c) => c.avatar === bound.avatar);
+    if (byAvatar) return byAvatar;
+  }
+  const active = chars[context.characterId];
+  if (active) return active;
+  return name ? (chars.find((c) => c.name === name) ?? null) : null;
+}
+
+/**
+ * Active speaker name for code that previously read context.name2 directly.
+ * 1:1 chats resolve through the pinned card; group chats keep name2, which
+ * tracks the current speaker there.
+ * @returns {string|null}
+ */
+export function resolveActiveName() {
+  const context = getContext();
+  if (context?.groupId) return context.name2 || context.characterName || null;
+  return resolveCharacterName() || context.name2 || context.characterName || null;
 }
 
 /**

@@ -41,6 +41,7 @@ import { macros as stMacros } from '../../../../scripts/macros/macro-system.js';
 import { MacrosParser } from '../../../../scripts/macros.js';
 import { power_user } from '../../../../scripts/power-user.js';
 import { MODULE_NAME } from './constants.js';
+import { resolveCharacterCard } from './scope.js';
 
 /**
  * Canonical macro names for all 11 macros (10 individual tiers + unified block).
@@ -112,7 +113,7 @@ export function isMacroActive(macroName) {
   // Auto-detection: look for the {{macro-name}} token in character card fields.
   const token = `{{${macroName}}}`;
   const context = getContext();
-  const char = context.characters?.find((c) => c.name === context.name2);
+  const char = resolveCharacterCard(context.name2);
   if (!char) return false;
   return CARD_FIELDS.some((f) => typeof char[f] === 'string' && char[f].includes(token));
 }

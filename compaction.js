@@ -39,6 +39,7 @@ import { generateMemorySummarize } from './generate.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { estimateTokens, MODULE_NAME, PROMPT_KEY_SHORT, META_KEY } from './constants.js';
+import { resolveActiveName } from './scope.js';
 import { buildSummaryPrompt, buildUpdateSummaryPrompt } from './prompts.js';
 import { formatSummary } from './parsers.js';
 import { loadCharacterMemories } from './longterm.js';
@@ -124,7 +125,7 @@ export async function runCompaction({ includeLastMessage = false } = {}) {
     // Build a brief digest of what is already stored at other tiers so the
     // summary can focus on narrative flow rather than restating known facts.
     // Capped to avoid overwhelming local model context windows.
-    const characterName = context.name2 || context.characterName || null;
+    const characterName = resolveActiveName();
     const longtermMemories = characterName
       ? loadCharacterMemories(characterName).filter((m) => !m.superseded_by)
       : [];

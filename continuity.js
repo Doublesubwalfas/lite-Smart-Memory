@@ -53,6 +53,7 @@ import { loadCharacterMemories } from './longterm.js';
 import { loadSessionMemories } from './session.js';
 import { parseContradictions } from './parsers.js';
 import { smLog } from './logging.js';
+import { resolveCharacterCard } from './scope.js';
 
 /**
  * Collects all established facts into a single labelled text block.
@@ -71,7 +72,7 @@ function gatherEstablishedFacts(characterName) {
   // that no extracted memory would catch, especially in a fresh chat.
   // Look up by name so group chat checks use the responder's card, not the
   // ST-active character (context.characterId) which may be a different member.
-  const char = context.characters?.find((c) => c.name === characterName);
+  const char = resolveCharacterCard(characterName);
   if (char) {
     const cardParts = [];
     if (char.description) cardParts.push(char.description);
