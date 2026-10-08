@@ -47,7 +47,6 @@ import {
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
-  saveSettingsDebounced,
 } from '../../../../script.js';
 import { getContext, extension_settings } from '../../../extensions.js';
 import {
@@ -63,6 +62,7 @@ import { getSceneParticipants } from './scenes.js';
 import { generateMemoryExtract } from './generate.js';
 import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
 import { smLog } from './logging.js';
+import { getRecord, patchRecord, persistRecords } from './scope.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
@@ -166,7 +166,7 @@ export function isEpistemicEnabled() {
  */
 export function loadEpistemicKnowledge(characterName) {
   if (!characterName) return [];
-  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.epistemic_knowledge ?? [];
+  return getRecord(characterName)?.epistemic_knowledge ?? [];
 }
 
 /**
@@ -178,11 +178,8 @@ export function loadEpistemicKnowledge(characterName) {
  */
 export function saveEpistemicKnowledge(characterName, entries) {
   if (!characterName || !Array.isArray(entries)) return;
-  const s = extension_settings[MODULE_NAME];
-  if (!s.characters) s.characters = {};
-  const existing = s.characters[characterName] ?? {};
-  s.characters[characterName] = { ...existing, epistemic_knowledge: entries };
-  saveSettingsDebounced();
+  patchRecord(characterName, { epistemic_knowledge: entries });
+  persistRecords();
 }
 
 /**
@@ -193,10 +190,10 @@ export function saveEpistemicKnowledge(characterName, entries) {
  */
 export function clearEpistemicKnowledge(characterName) {
   if (!characterName) return;
-  const s = extension_settings[MODULE_NAME];
-  if (!s.characters?.[characterName]) return;
-  s.characters[characterName].epistemic_knowledge = [];
-  saveSettingsDebounced();
+  const rec = getRecord(characterName);
+  if (!rec) return;
+  rec.epistemic_knowledge = [];
+  persistRecords();
 }
 
 // ---- Deduplication ----------------------------------------------------------

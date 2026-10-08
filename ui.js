@@ -105,6 +105,7 @@ import {
 } from './graph-migration.js';
 import { getUnifiedTierBreakdown } from './unified-inject.js';
 import { hasEmbeddingFailed } from './embeddings.js';
+import { resolveCharacterName } from './scope.js';
 import {
   getTierTrimStats,
   hasAnyTrimmedTier,
@@ -138,7 +139,8 @@ function getSettings() {
 /** Returns the active character name, or null if no character is loaded. */
 function getCurrentCharacterName() {
   const context = getContext();
-  return context.name2 || context.characterName || null;
+  if (context.groupId) return context.name2 || context.characterName || null;
+  return resolveCharacterName() || context.name2 || context.characterName || null;
 }
 
 /**

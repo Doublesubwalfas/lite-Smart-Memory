@@ -51,6 +51,7 @@ import {
   PROMPT_KEY_EPISTEMIC,
   PROMPT_KEY_STATE_LEDGER,
   generateMemoryId,
+  EXTENSION_PATH,
 } from './constants.js';
 import { memory_sources, fetchOllamaModels } from './generate.js';
 import { runCompaction, injectSummary, loadAndInjectSummary } from './compaction.js';
@@ -337,7 +338,14 @@ export const defaultSettings = {
   // in the system prompt or other card fields without needing this toggle.
   macros_enabled: false,
 
-  // Per-character memory storage (populated at runtime by longterm.js)
+  // Where per-character memory is stored.
+  //   'chat'      - inside each chat's own metadata (default). A chat owns its memory,
+  //                 so nothing leaks between stories that reuse the same card.
+  //   'character' - legacy global store shared by every chat with that card name.
+  storage_scope: 'chat',
+
+  // Legacy per-character memory storage (used only when storage_scope is 'character',
+  // and as the read-only source for the one-time per-chat import).
   characters: {},
 };
 
@@ -1155,6 +1163,16 @@ export function bindSettingsUI(ctrl) {
       saveSettingsDebounced();
       updateProfileLabel();
       syncProfileGating();
+    });
+
+  $('#sm_storage_scope')
+    .val(s.storage_scope === 'character' ? 'character' : 'chat')
+    .on('change', function () {
+      extension_settings[MODULE_NAME].storage_scope = $(this).val();
+      saveSettingsDebounced();
+      toastr.info('Storage scope changed. Switch chats or reload to apply it.', 'Smart Memory', {
+        timeOut: 4000,
+      });
     });
 
   updateProfileLabel();
@@ -3431,9 +3449,9 @@ export function bindSettingsUI(ctrl) {
   $('#sm_about').on('click', async function () {
     // Populate version from manifest.json so it stays in sync automatically.
     try {
-      const manifest = await fetch(
-        '/scripts/extensions/third-party/Smart-Memory/manifest.json',
-      ).then((r) => r.json());
+      const manifest = await fetch(`/scripts/extensions/${EXTENSION_PATH}/manifest.json`).then((r) =>
+        r.json(),
+      );
       $('#sm_about_version').text(manifest.version ?? '');
     } catch {
       $('#sm_about_version').text('');

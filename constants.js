@@ -39,6 +39,28 @@
 /** Extension name as registered in extension_settings. */
 export const MODULE_NAME = 'smart_memory';
 
+/**
+ * Install path of this extension relative to /scripts/extensions/, e.g.
+ * 'third-party/lite-Smart-Memory'. Derived from this module's own URL so the
+ * settings panel and manifest load no matter what the install folder is called
+ * (forks, renamed folders, manual installs). Falls back to the upstream name
+ * when the URL has no recognisable extensions segment.
+ */
+export const EXTENSION_PATH = (() => {
+  try {
+    const dir = new URL('.', import.meta.url).pathname;
+    const marker = '/scripts/extensions/';
+    const idx = dir.indexOf(marker);
+    if (idx >= 0) {
+      const rel = decodeURIComponent(dir.slice(idx + marker.length)).replace(/\/+$/, '');
+      if (rel) return rel;
+    }
+  } catch {
+    // fall through to the default
+  }
+  return 'third-party/Smart-Memory';
+})();
+
 // Keys passed to setExtensionPrompt - each tier has its own named slot.
 export const PROMPT_KEY_SHORT = 'smart_memory_short';
 export const PROMPT_KEY_LONG = 'smart_memory_long';

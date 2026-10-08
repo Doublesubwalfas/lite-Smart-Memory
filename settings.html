@@ -1873,6 +1873,22 @@
             <div id="sm_hardware_profile_label" class="sm_hardware_profile_label"></div>
           </div>
 
+          <!-- Storage scope -->
+          <div class="sm-block">
+            <label>
+              Memory storage
+              <span
+                class="sm-info"
+                data-tooltip="Per chat (default): every chat keeps its own memories, so stories that share a character card never bleed into each other. Per character (legacy): one shared store per card name, as in earlier versions. Existing chats copy their old per-character data in once the first time they load."
+                >ⓘ</span
+              >
+            </label>
+            <select id="sm_storage_scope" class="text_pole">
+              <option value="chat">Per chat (recommended)</option>
+              <option value="character">Per character (legacy, shared across chats)</option>
+            </select>
+          </div>
+
           <!-- Extraction frequency (simple mode only) -->
           <div class="sm-block sm-simple-only">
             <label>

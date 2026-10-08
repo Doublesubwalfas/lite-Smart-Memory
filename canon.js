@@ -38,7 +38,6 @@ import {
   setExtensionPrompt,
   extension_prompt_types,
   extension_prompt_roles,
-  saveSettingsDebounced,
 } from '../../../../script.js';
 import { generateMemoryExtract } from './generate.js';
 import { extension_settings } from '../../../extensions.js';
@@ -47,6 +46,7 @@ import { buildCanonSummaryPrompt } from './prompts.js';
 import { loadCharacterMemories } from './longterm.js';
 import { loadArcSummaries } from './arcs.js';
 import { smLog } from './logging.js';
+import { getRecord, patchRecord, persistRecords } from './scope.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { reportTierTrimStats } from './trim-stats.js';
@@ -60,7 +60,7 @@ import { reportTierTrimStats } from './trim-stats.js';
  */
 export function loadCanon(characterName) {
   if (!characterName) return null;
-  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.canon ?? null;
+  return getRecord(characterName)?.canon ?? null;
 }
 
 /**
@@ -73,15 +73,8 @@ export function loadCanon(characterName) {
  */
 export function saveCanon(characterName, text) {
   if (!characterName || !text) return;
-  if (!extension_settings[MODULE_NAME].characters) {
-    extension_settings[MODULE_NAME].characters = {};
-  }
-  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
-  extension_settings[MODULE_NAME].characters[characterName] = {
-    ...existing,
-    canon: { text, ts: Date.now() },
-  };
-  saveSettingsDebounced();
+  patchRecord(characterName, { canon: { text, ts: Date.now() } });
+  persistRecords();
 }
 
 /**
@@ -91,10 +84,10 @@ export function saveCanon(characterName, text) {
  */
 export function clearCanon(characterName) {
   if (!characterName) return;
-  const char = extension_settings[MODULE_NAME]?.characters?.[characterName];
+  const char = getRecord(characterName);
   if (char) {
     delete char.canon;
-    saveSettingsDebounced();
+    persistRecords();
   }
   setExtensionPrompt(PROMPT_KEY_CANON, '', extension_prompt_types.NONE, 0);
   invalidateUnifiedCache(PROMPT_KEY_CANON);

@@ -62,6 +62,7 @@ import { parseArcOutput } from './parsers.js';
 import { loadSceneHistory } from './scenes.js';
 import { loadSessionMemories } from './session.js';
 import { smLog } from './logging.js';
+import { getRecord, patchRecord, persistRecords } from './scope.js';
 import { getEmbeddingBatch, cosineSimilarity } from './embeddings.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
@@ -274,7 +275,7 @@ export async function clearArcSummaries() {
  */
 export function loadPersistentArcs(characterName) {
   if (!characterName) return [];
-  return extension_settings[MODULE_NAME]?.characters?.[characterName]?.persistent_arcs ?? [];
+  return getRecord(characterName)?.persistent_arcs ?? [];
 }
 
 /**
@@ -284,12 +285,8 @@ export function loadPersistentArcs(characterName) {
  */
 export function savePersistentArcs(characterName, arcs) {
   if (!characterName) return;
-  if (!extension_settings[MODULE_NAME]) extension_settings[MODULE_NAME] = {};
-  if (!extension_settings[MODULE_NAME].characters) extension_settings[MODULE_NAME].characters = {};
-  if (!extension_settings[MODULE_NAME].characters[characterName])
-    extension_settings[MODULE_NAME].characters[characterName] = {};
-  extension_settings[MODULE_NAME].characters[characterName].persistent_arcs = arcs;
-  saveSettingsDebounced();
+  patchRecord(characterName, { persistent_arcs: arcs });
+  persistRecords();
 }
 
 /**

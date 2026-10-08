@@ -61,6 +61,7 @@ import {
   PROMPT_KEY_RELATIONSHIPS,
   PROMPT_KEY_EPISTEMIC,
   PROMPT_KEY_STATE_LEDGER,
+  EXTENSION_PATH,
 } from './constants.js';
 import { memory_sources, abortCurrentMemoryGeneration } from './generate.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
@@ -126,6 +127,8 @@ import { classifyTurn, adaptiveBudgets } from './memory-utils.js';
 import { clearUnifiedSlot, maybeInjectUnified } from './unified-inject.js';
 import { registerSmartMemoryMacros } from './macros.js';
 import { smLog } from './logging.js';
+import { resolveCharacterName, importLegacyRecord } from './scope.js';
+import { buildRunKey, shouldSkipRun, beginRun, endRun } from './pipeline.js';
 import {
   isEpistemicEnabled,
   extractEpistemicKnowledge,
@@ -360,7 +363,11 @@ function getSettings() {
 /** Returns the active character name, or null if no character is loaded. */
 function getCurrentCharacterName() {
   const context = getContext();
-  return context.name2 || context.characterName || null;
+  // Group chats have no single card; name2 tracks the most recent speaker there.
+  // 1:1 chats resolve through the chat's pinned card so a transient name2 change
+  // (card swap, /sendas, impersonate) can never redirect memory to another record.
+  if (context.groupId) return context.name2 || context.characterName || null;
+  return resolveCharacterName() || context.name2 || context.characterName || null;
 }
 
 // Tracks which group member the settings panel is currently showing.
@@ -696,6 +703,17 @@ async function onCharacterMessageRendered(messageId, type) {
             return;
           }
 
+          // Run-once guard: an identical pass (same chat, window and newest message)
+          // that already completed or is running is never repeated.
+          const runKey = buildRunKey(snapshotCutoff);
+          if (shouldSkipRun(runKey)) {
+            messagesSinceLastExtraction = 0;
+            extractionRunning = false;
+            return;
+          }
+          beginRun(runKey);
+          let runCompleted = false;
+
           // Only reset the counter once we know extraction will actually proceed.
           messagesSinceLastExtraction = 0;
 
@@ -906,6 +924,8 @@ async function onCharacterMessageRendered(messageId, type) {
             if (metaAfter) {
               metaAfter.lastExtractCutoff = snapshotCutoff;
               if (shouldRefreshInjections) metaAfter.lastInjectionRefresh = snapshotCutoff;
+              runCompleted = true;
+              endRun(runKey, true);
               context.saveMetadata();
             }
           } catch (err) {
@@ -926,6 +946,9 @@ async function onCharacterMessageRendered(messageId, type) {
             // to fire with wrong values and persist them to disk.
             Object.assign(settings, originalBudgets);
             saveSettingsDebounced();
+            // A pass that did not complete is released without being recorded,
+            // so the next turn retries it.
+            if (!runCompleted) endRun(runKey, false);
             extractionRunning = false;
           }
         }
@@ -1133,7 +1156,10 @@ async function onChatChangedImpl() {
     // Migrate the selected character's data container before any reads so that
     // confidence/decay fields and other v2+ additions are present. Other members
     // are migrated lazily on their first onGroupMemberDrafted.
-    if (selectedGroupCharacter) ensureCharacterMigrated(selectedGroupCharacter);
+    if (selectedGroupCharacter) {
+      importLegacyRecord(selectedGroupCharacter);
+      ensureCharacterMigrated(selectedGroupCharacter);
+    }
     await injectMemories(selectedGroupCharacter);
     injectRelationshipHistory(selectedGroupCharacter);
     loadAndInjectEpistemicKnowledge(selectedGroupCharacter, selectedGroupCharacter);
@@ -1201,6 +1227,10 @@ async function onChatChangedImpl() {
   }
 
   const characterName = getCurrentCharacterName();
+
+  // Existing chats that predate per-chat storage get their character's legacy
+  // record copied in once; brand-new chats start clean.
+  importLegacyRecord(characterName);
 
   // Migrate character data now that we know which character is active.
   // Fast no-op when already at the current schema version.
@@ -1375,6 +1405,7 @@ async function onGroupMemberDrafted(chId) {
 
   // Migrate per-character data on first access in this session. Fast no-op
   // once already at the current schema version.
+  importLegacyRecord(characterName);
   ensureCharacterMigrated(characterName);
 
   // Seed the character entity so it appears in the entity panel and benefits
@@ -1595,9 +1626,16 @@ async function onGroupWrapperFinished({ type } = {}) {
               ? context.chat.length - 1
               : context.chat.length;
 
+          // Run-once guard (see pipeline.js): never repeat an identical pass.
+          const runKeyGroup = buildRunKey(snapshotCutoffGroup);
           if (longtermWindow.length === 0 && sessionWindow.length === 0) {
             extractionRunning = false;
+          } else if (shouldSkipRun(runKeyGroup)) {
+            messagesSinceLastExtraction = 0;
+            extractionRunning = false;
           } else {
+            beginRun(runKeyGroup);
+            let runCompletedGroup = false;
             messagesSinceLastExtraction = 0;
             setStatusMessage('Extracting memories...');
 
@@ -1806,6 +1844,8 @@ async function onGroupWrapperFinished({ type } = {}) {
                 metaAfterGroup.lastExtractCutoff = snapshotCutoffGroup;
                 if (shouldRefreshInjectionsGroup)
                   metaAfterGroup.lastInjectionRefresh = snapshotCutoffGroup;
+                runCompletedGroup = true;
+                endRun(runKeyGroup, true);
                 context.saveMetadata();
               }
             } catch (err) {
@@ -1820,6 +1860,7 @@ async function onGroupWrapperFinished({ type } = {}) {
               stopActivityLoader(activityHandle);
               Object.assign(settings, originalBudgets);
               saveSettingsDebounced();
+              if (!runCompletedGroup) endRun(runKeyGroup, false);
               extractionRunning = false;
             }
           }
@@ -1933,7 +1974,7 @@ jQuery(async function () {
   loadSettings();
   registerSmartMemoryMacros();
 
-  const html = await renderExtensionTemplateAsync('third-party/Smart-Memory', 'settings', {
+  const html = await renderExtensionTemplateAsync(EXTENSION_PATH, 'settings', {
     defaultSettings,
   });
   $('#extensions_settings').append(html);

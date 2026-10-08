@@ -99,6 +99,7 @@ import {
 } from './memory-utils.js';
 import { batchVerify, getEmbeddingBatch, getHardwareProfile } from './embeddings.js';
 import { smLog } from './logging.js';
+import { getRecord, patchRecord, deleteRecord, persistRecords } from './scope.js';
 import { invalidateUnifiedCache } from './unified-inject.js';
 import { MACRO_NAMES, setMacroContent, isMacroActive } from './macros.js';
 import { getSceneParticipants } from './scenes.js';
@@ -214,8 +215,7 @@ async function verifyLongtermCandidates(candidates, existing) {
  */
 export function loadCharacterMemories(characterName) {
   if (!characterName) return [];
-  const chars = extension_settings[MODULE_NAME].characters;
-  const memories = chars?.[characterName]?.memories ?? [];
+  const memories = getRecord(characterName)?.memories ?? [];
   // Migrate: entries without the consolidated flag are pre-existing stable memories.
   // Entries without an importance score default to 2 (medium).
   // applyGraphDefaults is a safety net for entries that predate the one-shot
@@ -246,17 +246,10 @@ export function loadCharacterMemories(characterName) {
  */
 export function saveCharacterMemories(characterName, memories) {
   if (!characterName || !Array.isArray(memories)) return;
-  if (!extension_settings[MODULE_NAME].characters) {
-    extension_settings[MODULE_NAME].characters = {};
-  }
-  // Spread the existing character object so the entity registry and any other
+  // patchRecord spreads the existing record so the entity registry and any other
   // fields stored alongside memories (e.g. entities, canon) are preserved.
-  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
-  extension_settings[MODULE_NAME].characters[characterName] = {
-    ...existing,
-    memories,
-    lastUpdated: Date.now(),
-  };
+  patchRecord(characterName, { memories, lastUpdated: Date.now() });
+  persistRecords();
 }
 
 /**
@@ -266,9 +259,8 @@ export function saveCharacterMemories(characterName, memories) {
  */
 export function clearCharacterMemories(characterName) {
   if (!characterName) return;
-  if (extension_settings[MODULE_NAME].characters?.[characterName]) {
-    delete extension_settings[MODULE_NAME].characters[characterName];
-  }
+  deleteRecord(characterName);
+  persistRecords();
 }
 
 // ---- Relationship history storage ---------------------------------------
@@ -282,8 +274,7 @@ export function clearCharacterMemories(characterName) {
  */
 export function loadRelationshipHistory(characterName) {
   if (!characterName) return {};
-  const raw =
-    extension_settings[MODULE_NAME].characters?.[characterName]?.relationship_history ?? {};
+  const raw = getRecord(characterName)?.relationship_history ?? {};
   // Normalize entries still in the old flat format { descriptors: string[], magnitude: string }
   // to the current per-descriptor format { descriptors: Array<{word, magnitude}> }.
   // This is a read-time safety net in case the schema migration did not run yet.
@@ -311,14 +302,8 @@ export function loadRelationshipHistory(characterName) {
  */
 export function saveRelationshipHistory(characterName, history) {
   if (!characterName || typeof history !== 'object') return;
-  if (!extension_settings[MODULE_NAME].characters) {
-    extension_settings[MODULE_NAME].characters = {};
-  }
-  const existing = extension_settings[MODULE_NAME].characters[characterName] ?? {};
-  extension_settings[MODULE_NAME].characters[characterName] = {
-    ...existing,
-    relationship_history: history,
-  };
+  patchRecord(characterName, { relationship_history: history });
+  persistRecords();
 }
 
 /**
@@ -328,8 +313,11 @@ export function saveRelationshipHistory(characterName, history) {
  */
 export function clearRelationshipHistory(characterName) {
   if (!characterName) return;
-  const char = extension_settings[MODULE_NAME].characters?.[characterName];
-  if (char) delete char.relationship_history;
+  const char = getRecord(characterName);
+  if (char) {
+    delete char.relationship_history;
+    persistRecords();
+  }
 }
 
 // ---- Formatting ---------------------------------------------------------
